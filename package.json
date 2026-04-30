@@ -1,7 +1,7 @@
 {
   "name": "forsaken-mail",
   "version": "1.0.0",
-  "description": "A self-hosted disposable mail service with SQLite persistence",
+  "description": "A self-hosted disposable mail service with persisted inbox history",
   "main": "app.js",
   "scripts": {
     "start": "node ./bin/www",

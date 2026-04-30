@@ -2,61 +2,40 @@
 
 const fs = require('fs');
 const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
 const config = require('./config');
 
 const storageConfig = config.storage || {};
-const dbPath = path.resolve(__dirname, '..', storageConfig.path || './data/forsaken-mail.sqlite');
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+const dataDir = path.resolve(__dirname, '..', 'data');
+const storagePath = path.resolve(__dirname, '..', storageConfig.path || './data/forsaken-mail.json');
+const defaultState = { nextId: 1, mails: [] };
 
-const db = new DatabaseSync(dbPath);
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  CREATE TABLE IF NOT EXISTS mails (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    inbox TEXT NOT NULL,
-    mail_to TEXT,
-    mail_from TEXT,
-    subject TEXT,
-    text_body TEXT,
-    html_body TEXT,
-    headers_json TEXT,
-    raw_json TEXT,
-    received_at TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE INDEX IF NOT EXISTS idx_mails_inbox_received_at ON mails (inbox, received_at DESC);
-`);
+fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(path.dirname(storagePath), { recursive: true });
 
-const insertStmt = db.prepare(`
-  INSERT INTO mails (
-    inbox, mail_to, mail_from, subject, text_body, html_body, headers_json, raw_json, received_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`);
+function loadState() {
+  if (!fs.existsSync(storagePath)) {
+    return { ...defaultState };
+  }
 
-const listStmt = db.prepare(`
-  SELECT id, inbox, mail_to, mail_from, subject, received_at
-  FROM mails
-  WHERE inbox = ?
-  ORDER BY datetime(received_at) DESC, id DESC
-  LIMIT ?
-`);
+  try {
+    const raw = fs.readFileSync(storagePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return {
+      nextId: Number(parsed.nextId || 1),
+      mails: Array.isArray(parsed.mails) ? parsed.mails : []
+    };
+  } catch (_) {
+    return { ...defaultState };
+  }
+}
 
-const getStmt = db.prepare(`
-  SELECT * FROM mails WHERE id = ?
-`);
+let state = loadState();
 
-const cleanupInboxStmt = db.prepare(`
-  DELETE FROM mails
-  WHERE inbox = ? AND id NOT IN (
-    SELECT id FROM mails WHERE inbox = ? ORDER BY datetime(received_at) DESC, id DESC LIMIT ?
-  )
-`);
-
-const cleanupExpiredStmt = db.prepare(`
-  DELETE FROM mails
-  WHERE datetime(received_at) < datetime('now', ?)
-`);
+function persist() {
+  const tempPath = storagePath + '.tmp';
+  fs.writeFileSync(tempPath, JSON.stringify(state, null, 2));
+  fs.renameSync(tempPath, storagePath);
+}
 
 function clampBody(value) {
   if (!value) return '';
@@ -72,26 +51,34 @@ function normalizeReceivedAt(headers) {
   return dateValue.toISOString();
 }
 
+function cleanupExpiredInMemory() {
+  const ttlHours = Number(storageConfig.mailTtlHours || 48);
+  const cutoff = Date.now() - (ttlHours * 60 * 60 * 1000);
+  state.mails = state.mails.filter(mail => {
+    const ts = new Date(mail.received_at).getTime();
+    return !Number.isNaN(ts) && ts >= cutoff;
+  });
+}
+
+function cleanupInboxInMemory(inbox) {
+  const maxMailsPerInbox = Number(storageConfig.maxMailsPerInbox || 100);
+  const inboxMails = state.mails
+    .filter(mail => mail.inbox === inbox)
+    .sort((a, b) => {
+      const ta = new Date(a.received_at).getTime();
+      const tb = new Date(b.received_at).getTime();
+      return tb - ta || b.id - a.id;
+    });
+  const keepIds = new Set(inboxMails.slice(0, maxMailsPerInbox).map(mail => mail.id));
+  state.mails = state.mails.filter(mail => mail.inbox !== inbox || keepIds.has(mail.id));
+}
+
 function saveMail(inbox, data) {
   const headers = data && data.headers ? data.headers : {};
   const receivedAt = normalizeReceivedAt(headers);
-  const result = insertStmt.run(
-    inbox,
-    headers.to || '',
-    headers.from || '',
-    headers.subject || '',
-    clampBody(data.text || ''),
-    clampBody(data.html || ''),
-    JSON.stringify(headers),
-    JSON.stringify(data),
-    receivedAt
-  );
 
-  cleanupInbox(inbox);
-  cleanupExpired();
-
-  return {
-    id: Number(result.lastInsertRowid),
+  const record = {
+    id: state.nextId++,
     inbox,
     mail_to: headers.to || '',
     mail_from: headers.from || '',
@@ -100,27 +87,41 @@ function saveMail(inbox, data) {
     html_body: clampBody(data.html || ''),
     headers_json: JSON.stringify(headers),
     raw_json: JSON.stringify(data),
-    received_at: receivedAt
+    received_at: receivedAt,
+    created_at: new Date().toISOString()
   };
-}
 
-function cleanupInbox(inbox) {
-  const maxMailsPerInbox = Number(storageConfig.maxMailsPerInbox || 100);
-  cleanupInboxStmt.run(inbox, inbox, maxMailsPerInbox);
-}
+  state.mails.push(record);
+  cleanupInboxInMemory(inbox);
+  cleanupExpiredInMemory();
+  persist();
 
-function cleanupExpired() {
-  const ttlHours = Number(storageConfig.mailTtlHours || 48);
-  cleanupExpiredStmt.run(`-${ttlHours} hours`);
+  return record;
 }
 
 function listMails(inbox) {
+  cleanupExpiredInMemory();
+  persist();
   const maxMailsPerInbox = Number(storageConfig.maxMailsPerInbox || 100);
-  return listStmt.all(inbox, maxMailsPerInbox);
+  return state.mails
+    .filter(mail => mail.inbox === inbox)
+    .sort((a, b) => {
+      const ta = new Date(a.received_at).getTime();
+      const tb = new Date(b.received_at).getTime();
+      return tb - ta || b.id - a.id;
+    })
+    .slice(0, maxMailsPerInbox);
 }
 
 function getMail(id) {
-  return getStmt.get(Number(id));
+  cleanupExpiredInMemory();
+  persist();
+  return state.mails.find(mail => mail.id === Number(id)) || null;
+}
+
+function cleanupExpired() {
+  cleanupExpiredInMemory();
+  persist();
 }
 
 module.exports = {

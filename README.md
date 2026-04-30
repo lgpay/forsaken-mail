@@ -18,10 +18,10 @@ This branch upgrades the original demo into a more practical self-hosted tool:
 
 ### Storage
 
-Default SQLite path:
+Default storage path:
 
 ```bash
-./data/forsaken-mail.sqlite
+./data/forsaken-mail.json
 ```
 
 ### Config
