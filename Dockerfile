@@ -1,15 +1,15 @@
-FROM node:lts-alpine
-MAINTAINER Hongcai Deng <admin@dhchouse.com>
+FROM node:22-alpine
 
 WORKDIR /forsaken-mail
 
-RUN wget https://github.com/denghongcai/forsaken-mail/archive/master.tar.gz -q -O /tmp/forsaken-mail-master.tar.gz \
-    && tar zxf /tmp/forsaken-mail-master.tar.gz -C /tmp \
-    && mv /tmp/forsaken-mail-master/* /forsaken-mail \
-    && rm /tmp/forsaken-mail-master.tar.gz \
-    && npm install --production \
-    && npm cache clean --force
+COPY package*.json ./
+RUN npm install --omit=dev && npm cache clean --force
+
+COPY . .
+
+RUN mkdir -p /forsaken-mail/data
 
 EXPOSE 25
 EXPOSE 3000
+
 CMD ["npm", "start"]

@@ -13,6 +13,6 @@
     "mailTtlHours": 48,
     "maxBodyChars": 200000
   },
-  "host": "disposable.dhc-app.com",
+  "host": "arm.3w.pm",
   "keywordBlackList": ["admin", "postmaster", "system", "webmaster", "administrator", "hostmaster", "service", "server", "root"]
 }

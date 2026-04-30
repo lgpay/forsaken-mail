@@ -1,0 +1,8 @@
+node_modules
+data
+.git
+.gitignore
+npm-debug.log
+Dockerfile*
+README.md
+PLAN.md

@@ -4,14 +4,10 @@
 
 'use strict';
 
-let path = require('path');
 let mailin = require('mailin');
-let config = require('./config');
-
-mailin.start(config.mailin);
 
 mailin.on('error', function(err) {
-  console.error(err.stack);
+  console.error(err && err.stack ? err.stack : err);
 });
 
 module.exports = mailin;
