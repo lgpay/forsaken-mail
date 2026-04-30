@@ -3,7 +3,10 @@ FROM node:20-alpine
 WORKDIR /forsaken-mail
 
 COPY package*.json ./
-RUN npm install --omit=dev && npm cache clean --force
+COPY scripts ./scripts
+RUN npm install --omit=dev \
+    && node ./scripts/patch-smtp-stream.js \
+    && npm cache clean --force
 
 COPY . .
 
