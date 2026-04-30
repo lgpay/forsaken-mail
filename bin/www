@@ -8,6 +8,7 @@
 
 let path = require('path');
 let app = require(path.join(__dirname, '..', 'app'));
+let config = require(path.join(__dirname, '..', 'modules/config'));
 let ioApp = require(path.join(__dirname, '..', 'modules/io'));
 let debug = require('debug')('server');
 let io = require('socket.io');
@@ -17,7 +18,7 @@ let http = require('http');
  * Get port from environment and store in Express.
  */
 
-let port = normalizePort(process.env.PORT || '3000');
+let port = normalizePort(process.env.PORT || String((config.web && config.web.port) || '3000'));
 app.set('port', port);
 
 /**

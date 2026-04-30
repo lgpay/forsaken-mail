@@ -4,6 +4,15 @@
     "port": 25,
     "disableWebhook": true
   },
+  "web": {
+    "port": 3000
+  },
+  "storage": {
+    "path": "./data/forsaken-mail.sqlite",
+    "maxMailsPerInbox": 100,
+    "mailTtlHours": 48,
+    "maxBodyChars": 200000
+  },
   "host": "disposable.dhc-app.com",
   "keywordBlackList": ["admin", "postmaster", "system", "webmaster", "administrator", "hostmaster", "service", "server", "root"]
 }
