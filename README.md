@@ -1,43 +1,45 @@
 Forsaken-Mail
 ==============
-A self-hosted disposable mail service with persisted inbox history.
+一个适合自部署的临时邮箱服务，支持收信历史持久化。
 
-[Online Demo](http://disposable.dhc-app.com)
+[在线演示](http://disposable.dhc-app.com)
 
-## What this fork adds
+## 项目简介
 
-This fork turns the original real-time demo into something more practical for personal/self-hosted use:
+这个分支在原项目“偏演示”的基础上，往“能自用、能部署、能保留历史邮件”的方向做了二开。
 
-- persisted inbox history
-- inbox history API
-- mail detail API
-- custom inbox name validation
-- basic HTML sanitization before rendering
-- per-inbox retention limit
-- TTL-based cleanup
-- legacy SQLite → JSON migration script
-- storage health reporting when legacy data blocks startup
+当前已经补上的能力：
 
-## Architecture
+- 邮件历史持久化
+- Inbox 历史列表 API
+- 邮件详情 API
+- 自定义邮箱前缀校验
+- HTML 邮件基础净化后再展示
+- 每个 Inbox 的邮件保留上限
+- TTL 过期清理
+- 旧版 SQLite 数据迁移到 JSON 的脚本
+- 存储异常检测与健康状态返回
 
-- **SMTP ingest**: `mailin`
-- **Web/API**: Express + socket.io
-- **Storage**: JSON file storage
-- **Frontend**: static HTML + jQuery
+## 技术结构
 
-Real-time push is still preserved, while history is loaded through API calls.
+- **SMTP 收信**：`mailin`
+- **Web / API**：Express + socket.io
+- **存储**：JSON 文件存储
+- **前端**：静态 HTML + jQuery
 
-## Quick start
+项目仍保留实时推送体验，同时通过 API 拉取历史邮件。
 
-### 1) Install dependencies
+## 快速开始
+
+### 1）安装依赖
 
 ```bash
 npm install
 ```
 
-### 2) Configure
+### 2）修改配置
 
-Edit `config-default.json` as needed:
+编辑 `config-default.json`：
 
 ```json
 {
@@ -70,39 +72,41 @@ Edit `config-default.json` as needed:
 }
 ```
 
-### 3) Start the app
+### 3）启动服务
 
 ```bash
 npm start
 ```
 
-Open:
+浏览器打开：
 
 ```bash
 http://localhost:3000
 ```
 
-### 4) Run checks
+### 4）运行测试
 
 ```bash
 npm test
 ```
 
-## Storage notes
+## 存储说明
 
-Current code uses **JSON file storage**.
+当前代码使用的是 **JSON 文件存储**。
 
-Default configured path is still:
+默认配置里的路径仍然是：
 
 ```bash
 ./data/forsaken-mail.sqlite
 ```
 
-That filename is kept mostly for backward compatibility with older deployments, but **the current implementation writes JSON into that path**.
+注意：
 
-### Recommendation
+虽然文件名还叫 `.sqlite`，但**当前实现实际写入的是 JSON 内容**。这个命名主要是为了兼容旧部署，避免直接改路径带来额外迁移成本。
 
-For new deployments, it is cleaner to change the path to a `.json` filename, for example:
+### 推荐做法
+
+如果是新部署，建议你把存储路径直接改成 `.json`，更清晰：
 
 ```json
 {
@@ -112,56 +116,56 @@ For new deployments, it is cleaner to change the path to a `.json` filename, for
 }
 ```
 
-### Legacy SQLite detection
+### 旧版 SQLite 检测
 
-If `storage.path` still points at an actual old SQLite database file, the app now:
+如果 `storage.path` 指向的是真正的旧 SQLite 数据库，当前版本不会再把它误当成空数据继续运行，而是会：
 
-- reports storage status from `GET /api/`
-- returns `503` from mail APIs
-- avoids silently treating the old database as an empty inbox
+- 在 `GET /api/` 中返回存储状态
+- 在邮件相关 API 中返回 `503`
+- 明确提示你这是旧 SQLite，需要先迁移
 
-This makes migration issues obvious instead of hiding them.
+这样能避免“老数据明明还在，但界面看起来像空邮箱”的坑。
 
-## SQLite migration
+## SQLite 迁移到 JSON
 
-If you still have mail data in the old SQLite format, migrate it first:
+如果你之前用的是旧版 SQLite 存储，可以先执行迁移：
 
 ```bash
 npm run migrate:sqlite -- --from ./data/forsaken-mail.sqlite --to ./data/forsaken-mail.json
 ```
 
-Useful flags:
+常用参数：
 
-- `--force` overwrite an existing non-empty target JSON file
-- `--compact` write minified JSON
-- `--help` show usage
+- `--force`：覆盖已存在且非空的目标 JSON 文件
+- `--compact`：输出压缩后的 JSON
+- `--help`：查看帮助
 
-The script prints a JSON summary with:
+迁移完成后，脚本会输出一份 JSON 摘要，包含：
 
-- migrated mail count
-- inbox count
-- resulting `nextId`
+- 迁移的邮件数量
+- Inbox 数量
+- 生成后的 `nextId`
 
-### Typical migration flow
+### 推荐迁移流程
 
 ```bash
-# 1. Export old SQLite storage into JSON
+# 1. 把旧 SQLite 数据导出成 JSON
 npm run migrate:sqlite -- --from ./data/forsaken-mail.sqlite --to ./data/forsaken-mail.json
 
-# 2. Update config to point to the JSON file
+# 2. 修改配置，把 storage.path 指向新的 JSON 文件
 #    storage.path = ./data/forsaken-mail.json
 
-# 3. Start the service again
+# 3. 启动服务
 npm start
 ```
 
-## APIs
+## API 说明
 
 ### `GET /api/`
 
-Health check and storage status.
+健康检查 + 存储状态。
 
-Example response:
+示例响应：
 
 ```json
 {
@@ -177,9 +181,9 @@ Example response:
 
 ### `GET /api/inboxes/:inbox/mails`
 
-List inbox history.
+获取指定 Inbox 的历史邮件列表。
 
-Example:
+示例：
 
 ```bash
 curl http://localhost:3000/api/inboxes/demo/mails
@@ -187,77 +191,76 @@ curl http://localhost:3000/api/inboxes/demo/mails
 
 ### `GET /api/mails/:id`
 
-Fetch mail detail.
+获取指定邮件详情。
 
-Example:
+示例：
 
 ```bash
 curl http://localhost:3000/api/mails/1
 ```
 
-If storage is blocked because the configured file is still a legacy SQLite database, these APIs return `503` with the detected storage reason.
+如果当前存储文件仍是旧版 SQLite，相关 API 会返回 `503`，并附带检测到的原因。
 
-## Inbox rules
+## Inbox 命名规则
 
-Custom inbox names must:
+自定义邮箱前缀必须满足：
 
-- start with a lowercase letter or digit
-- contain only `a-z`, `0-9`, `.`, `_`, `-`
-- be 2 to 32 chars long
-- not include reserved keywords from `keywordBlackList`
+- 以小写字母或数字开头
+- 只能包含 `a-z`、`0-9`、`.`、`_`、`-`
+- 长度 2 到 32 位
+- 不能包含 `keywordBlackList` 里的保留关键词
 
-## DNS setup
+## DNS 配置
 
-To receive emails, your SMTP server must be reachable and correctly published in DNS.
+如果你希望真实接收外部邮件，需要正确配置 DNS。
 
-Assume you want to receive mail at:
+假设你想接收：
 
 ```text
 *@subdomain.domain.com
 ```
 
-Then configure:
+那么至少需要：
 
-- MX record: `subdomain.domain.com MX 10 mxsubdomain.domain.com`
-- A record: `mxsubdomain.domain.com A <your-server-ip>`
+- MX 记录：`subdomain.domain.com MX 10 mxsubdomain.domain.com`
+- A 记录：`mxsubdomain.domain.com A <你的服务器 IP>`
 
-You can verify this with an SMTP / MX tester such as:
+可以用这类工具做检查：
 
 - <http://mxtoolbox.com/diagnostic.aspx>
 
-## Docker
+## Docker 使用
 
-Build:
+构建镜像：
 
 ```bash
 docker build -t denghongcai/forsaken-mail .
 ```
 
-Run:
+运行容器：
 
 ```bash
 docker run --name forsaken-mail -d -p 25:25 -p 3000:3000 denghongcai/forsaken-mail
 ```
 
-## Project status
+## 当前定位
 
-This is still a lightweight self-hosted disposable mailbox project, not a hardened large-scale mail platform.
+这个项目目前更适合：
 
-Already improved:
+- 个人自用
+- 小规模自部署
+- 临时收信场景
+- 开发 / 测试 / 验证邮件流程
 
-- persisted history
-- basic validation
-- cleanup limits
-- migration tooling
-- startup/storage diagnostics
+它还不是一个面向大规模生产环境的完整邮件平台。
 
-Still reasonable future work:
+## 后续可继续做的方向
 
-- attachment support
-- rate limiting / abuse controls
-- multi-domain support
-- admin view
-- production deployment polish
+- 附件支持
+- 限流 / 防滥用
+- 多域名支持
+- 管理后台
+- 更完整的生产部署方案
 
 ## License
 
