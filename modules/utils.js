@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+
 const RESERVED_PATTERN = /^[a-z0-9][a-z0-9._-]{1,31}$/;
 
 function sanitizeHtml(html) {
@@ -19,6 +21,10 @@ function isValidInboxName(id, keywordBlackList) {
     return false;
   }
   return true;
+}
+
+function createAnonymousInboxId() {
+  return 'anon-' + crypto.randomBytes(5).toString('hex');
 }
 
 function toMailSummary(row) {
@@ -56,6 +62,7 @@ function toMailDetail(row) {
 module.exports = {
   sanitizeHtml,
   isValidInboxName,
+  createAnonymousInboxId,
   toMailSummary,
   toMailDetail
 };

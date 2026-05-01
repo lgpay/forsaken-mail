@@ -24,6 +24,12 @@ app.use(function(req, res, next) {
   next(err);
 });
 
-app.use(err => debug(err));
+app.use(function(err, req, res, next) {
+  if (req && req.path && req.path.indexOf('/api/') === 0) {
+    return res.status(err.status || 500).json({ error: err.message || 'internal error' });
+  }
+  debug(err);
+  res.status(err.status || 500).send(err.message || 'Error');
+});
 
 module.exports = app;

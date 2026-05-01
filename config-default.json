@@ -13,6 +13,11 @@
     "mailTtlHours": 48,
     "maxBodyChars": 200000
   },
+  "auth": {
+    "ownerPassword": "",
+    "statePath": "./data/auth-state.json",
+    "sessionTtlHours": 168
+  },
   "host": "arm.3w.pm",
   "keywordBlackList": ["admin", "postmaster", "system", "webmaster", "administrator", "hostmaster", "service", "server", "root"]
 }

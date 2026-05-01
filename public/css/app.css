@@ -189,6 +189,44 @@ body > .ui.modal {
     margin-top: 18px;
 }
 
+.owner-panel {
+    margin-top: 16px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    background: #f8fbff;
+    border: 1px dashed #cfd9e8;
+}
+
+.owner-panel__status {
+    color: var(--text-soft);
+    margin-bottom: 12px;
+}
+
+.owner-panel__generated {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #fff8e6;
+    border: 1px solid #f2d28a;
+    color: #7a5716;
+    line-height: 1.7;
+}
+
+.owner-panel__generated code {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: rgba(122, 87, 22, 0.08);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.owner-panel__actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
 .meta-chip {
     min-width: 140px;
     padding: 12px 14px;

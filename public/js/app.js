@@ -5,6 +5,10 @@ $(function() {
   var currentInbox = null;
   var currentMailId = null;
   var currentSelectedRow = null;
+  var currentMode = 'anonymous';
+  var isOwner = false;
+  var authInfo = null;
+  var inboxSessionId = ensureInboxSessionId();
 
   var $customShortId = $('#customShortid');
   var $shortId = $('#shortid');
@@ -19,8 +23,51 @@ $(function() {
   var $mailTip = $('#mailTip');
   var $connectionStatus = $('#connectionStatus');
   var $viewRawBtn = $('#viewRawBtn');
+  var $inboxMode = $('#inboxMode');
+  var $ownerStatusText = $('#ownerStatusText');
+  var $ownerGeneratedBox = $('#ownerGeneratedBox');
+  var $ownerLoginForm = $('#ownerLoginForm');
+  var $ownerLogoutBox = $('#ownerLogoutBox');
+  var $ownerPassword = $('#ownerPassword');
+  var $ownerLoginBtn = $('#ownerLoginBtn');
+  var $ownerCurrentPassword = $('#ownerCurrentPassword');
+  var $ownerNewPassword = $('#ownerNewPassword');
+  var $ownerChangePasswordBtn = $('#ownerChangePasswordBtn');
+  var $ownerLogoutBtn = $('#ownerLogoutBtn');
   var $placeholderOld = '请等待分配临时邮箱';
   var $placeholderNew = '请输入不带后缀邮箱账号';
+
+  function ensureInboxSessionId() {
+    var key = 'fm_inbox_session';
+    var current = localStorage.getItem(key);
+    if (!current) {
+      current = 'sess-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+      localStorage.setItem(key, current);
+    }
+    return current;
+  }
+
+  function apiGet(url) {
+    return $.ajax({
+      url: url,
+      method: 'GET',
+      headers: {
+        'X-Inbox-Session': inboxSessionId
+      }
+    });
+  }
+
+  function apiPost(url, data) {
+    return $.ajax({
+      url: url,
+      method: 'POST',
+      contentType: 'application/json',
+      data: JSON.stringify(data || {}),
+      headers: {
+        'X-Inbox-Session': inboxSessionId
+      }
+    });
+  }
 
   function escapeHtml(value) {
     return $('<div>').text(value || '').html();
@@ -39,6 +86,34 @@ $(function() {
 
   function setMailCount(count) {
     $mailCount.text(Number(count || 0));
+  }
+
+  function setMode(mode) {
+    currentMode = mode || 'anonymous';
+    $inboxMode.text(currentMode === 'persistent' ? '持久保存' : '匿名临时');
+  }
+
+  function refreshOwnerUi() {
+    $customShortId.prop('disabled', !isOwner);
+
+    if (authInfo && authInfo.generatedPassword) {
+      $ownerGeneratedBox
+        .html('首次启动已生成随机 owner 密码：<code>' + escapeHtml(authInfo.generatedPassword) + '</code>，请尽快登录后修改。')
+        .show();
+    } else {
+      $ownerGeneratedBox.hide().empty();
+    }
+
+    if (isOwner) {
+      $ownerStatusText.text('已登录：你现在可以设置自定义前缀，并保留历史邮件。');
+      $ownerLoginForm.hide();
+      $ownerLogoutBox.show();
+    } else {
+      $ownerStatusText.text('未登录：只能使用随机前缀，邮件不会持久保存。');
+      $ownerLoginForm.show();
+      $ownerLogoutBox.hide();
+      $customShortId.data('editing', false).html('<i class="edit icon"></i>自定义前缀');
+    }
   }
 
   function setEmptyView() {
@@ -75,7 +150,7 @@ $(function() {
     if (mail.html) {
       $mailBody.html(mail.html);
     } else {
-      $mailBody.html($('<pre>').text(mail.text || '')); 
+      $mailBody.html($('<pre>').text(mail.text || ''));
     }
 
     $('#raw .header').text('邮件原始数据');
@@ -104,7 +179,7 @@ $(function() {
   }
 
   function loadMailDetail(id) {
-    $.getJSON('/api/mails/' + id, function(mail) {
+    apiGet('/api/mails/' + id).done(function(mail) {
       selectMailRow(id);
       renderMailDetail(mail);
     });
@@ -125,15 +200,17 @@ $(function() {
       $maillist.append(renderMailRow(mail));
     });
 
-    var targetId = currentSelectedRow || mails[0].id;
+    var exists = mails.some(function(mail) { return mail.id === currentSelectedRow; });
+    var targetId = exists ? currentSelectedRow : mails[0].id;
     loadMailDetail(targetId);
   }
 
   function loadInboxHistory(inbox) {
     currentInbox = inbox;
-    $.getJSON('/api/inboxes/' + inbox + '/mails', function(result) {
+    apiGet('/api/inboxes/' + inbox + '/mails').done(function(result) {
+      setMode(result.mode || 'anonymous');
       renderList(result.mails || []);
-      $mailTip.text('当前收件箱历史已加载');
+      $mailTip.text(currentMode === 'persistent' ? '持久收件箱历史已加载' : '匿名收件箱仅当前会话可见');
     }).fail(function(xhr) {
       $mailTip.text((xhr.responseJSON && xhr.responseJSON.error) || '加载失败');
       setMailCount(0);
@@ -143,21 +220,52 @@ $(function() {
     });
   }
 
-  function setMailAddress(id) {
-    currentInbox = id;
-    localStorage.setItem('shortid', id);
-    var mailaddress = id + '@' + location.hostname;
-    $shortId.val(mailaddress);
-    $('#copyAddressBtn .copyable').attr('data-clipboard-text', mailaddress);
-    $mailTip.text('把这个邮箱填到目标网站里即可收信');
-    loadInboxHistory(id);
+  function setMailAddress(payload) {
+    if (typeof payload === 'string') {
+      payload = {
+        inbox: payload,
+        mode: 'anonymous',
+        address: payload + '@' + location.hostname
+      };
+    }
+
+    currentInbox = payload.inbox;
+    setMode(payload.mode || 'anonymous');
+    $shortId.val(payload.address || (payload.inbox + '@' + location.hostname));
+    $('#copyAddressBtn .copyable').attr('data-clipboard-text', $shortId.val());
+    $mailTip.text(currentMode === 'persistent' ? '已进入持久模式邮箱' : '匿名模式下邮件不会持久保存');
+    loadInboxHistory(payload.inbox);
   }
 
   function requestNewInbox() {
+    currentSelectedRow = null;
     socket.emit('request shortid', true);
   }
 
+  function fetchAuthStatus() {
+    return apiGet('/api/auth/status').done(function(result) {
+      isOwner = !!result.isOwner;
+      authInfo = result.auth || null;
+      refreshOwnerUi();
+    });
+  }
+
+  function restoreSessionInbox() {
+    return apiGet('/api/session/inbox').done(function(result) {
+      if (result && result.inbox && result.inbox.inbox) {
+        setMailAddress(result.inbox);
+      } else {
+        requestNewInbox();
+      }
+    });
+  }
+
   $customShortId.on('click', function() {
+    if (!isOwner) {
+      $mailTip.text('请先登录持久模式');
+      return;
+    }
+
     var isEditing = $(this).data('editing') === true;
     if (!isEditing) {
       $(this).data('editing', true).html('<i class="check icon"></i>确认前缀');
@@ -186,6 +294,55 @@ $(function() {
     }
   });
 
+  $ownerLoginBtn.on('click', function() {
+    var password = ($ownerPassword.val() || '').trim();
+    if (!password) {
+      $mailTip.text('请输入密码');
+      return;
+    }
+
+    apiPost('/api/auth/login', { password: password }).done(function(result) {
+      isOwner = true;
+      authInfo = result.auth || authInfo;
+      $ownerPassword.val('');
+      refreshOwnerUi();
+      $mailTip.text('已登录持久模式');
+    }).fail(function(xhr) {
+      $mailTip.text((xhr.responseJSON && xhr.responseJSON.error) || '登录失败');
+    });
+  });
+
+  $ownerChangePasswordBtn.on('click', function() {
+    var currentPassword = ($ownerCurrentPassword.val() || '').trim();
+    var newPassword = ($ownerNewPassword.val() || '').trim();
+    if (!currentPassword || !newPassword) {
+      $mailTip.text('请填写当前密码和新密码');
+      return;
+    }
+
+    apiPost('/api/auth/change-password', {
+      currentPassword: currentPassword,
+      newPassword: newPassword
+    }).done(function(result) {
+      authInfo = result.auth || null;
+      $ownerCurrentPassword.val('');
+      $ownerNewPassword.val('');
+      refreshOwnerUi();
+      $mailTip.text('密码修改成功');
+    }).fail(function(xhr) {
+      $mailTip.text((xhr.responseJSON && xhr.responseJSON.error) || '密码修改失败');
+    });
+  });
+
+  $ownerLogoutBtn.on('click', function() {
+    apiPost('/api/auth/logout', {}).done(function() {
+      isOwner = false;
+      refreshOwnerUi();
+      $mailTip.text('已退出登录，回到匿名模式');
+      requestNewInbox();
+    });
+  });
+
   clipboard.on('success', function() {
     $mailTip.text('邮箱地址已复制');
   });
@@ -198,22 +355,17 @@ $(function() {
 
   socket.on('connect', function() {
     setConnectionStatus('已连接');
-    if ('localStorage' in window) {
-      var shortid = localStorage.getItem('shortid');
-      if (!shortid) {
-        requestNewInbox();
-      } else {
-        socket.emit('set shortid', shortid);
-      }
-    }
+    fetchAuthStatus().always(function() {
+      restoreSessionInbox();
+    });
   });
 
   socket.on('disconnect', function() {
     setConnectionStatus('连接断开');
   });
 
-  socket.on('shortid', function(id) {
-    setMailAddress(id);
+  socket.on('shortid', function(payload) {
+    setMailAddress(payload);
   });
 
   socket.on('shortid error', function(message) {
@@ -234,11 +386,13 @@ $(function() {
       }
     }
 
-    $mailTip.text('收到一封新邮件');
+    $mailTip.text(currentMode === 'persistent' ? '收到一封新邮件，已保存' : '收到一封新邮件，仅当前会话可见');
     currentSelectedRow = mail.id;
     loadInboxHistory(currentInbox);
   });
 
   setEmptyView();
+  refreshOwnerUi();
   setConnectionStatus('连接中');
+  setMode('anonymous');
 });

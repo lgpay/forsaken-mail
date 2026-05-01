@@ -119,12 +119,11 @@ function cleanupInboxInMemory(inbox) {
   state.mails = state.mails.filter(mail => mail.inbox !== inbox || keepIds.has(mail.id));
 }
 
-function saveMail(inbox, data) {
-  ensureWritableStorage();
+function createMailRecord(inbox, data) {
   const headers = data && data.headers ? data.headers : {};
   const receivedAt = normalizeReceivedAt(headers);
 
-  const record = {
+  return {
     id: state.nextId++,
     inbox,
     mail_to: headers.to || '',
@@ -137,6 +136,11 @@ function saveMail(inbox, data) {
     received_at: receivedAt,
     created_at: new Date().toISOString()
   };
+}
+
+function saveMail(inbox, data) {
+  ensureWritableStorage();
+  const record = createMailRecord(inbox, data);
 
   state.mails.push(record);
   cleanupInboxInMemory(inbox);
@@ -144,6 +148,10 @@ function saveMail(inbox, data) {
   persist();
 
   return record;
+}
+
+function createTransientMail(inbox, data) {
+  return createMailRecord(inbox, data);
 }
 
 function listMails(inbox) {
@@ -183,6 +191,7 @@ function getStatus() {
 
 module.exports = {
   saveMail,
+  createTransientMail,
   listMails,
   getMail,
   cleanupExpired,

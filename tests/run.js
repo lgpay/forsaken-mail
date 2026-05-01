@@ -11,24 +11,26 @@ function clearModule(modulePath) {
   delete require.cache[require.resolve(modulePath)];
 }
 
-function loadStorageWithConfig(storageConfig, extraConfig = {}) {
+function injectConfig(configValue) {
   const configModulePath = path.join(repoRoot, 'modules', 'config.js');
-  const storageModulePath = path.join(repoRoot, 'modules', 'storage.js');
-
   clearModule(configModulePath);
-  clearModule(storageModulePath);
-
   require.cache[require.resolve(configModulePath)] = {
     id: require.resolve(configModulePath),
     filename: require.resolve(configModulePath),
     loaded: true,
-    exports: {
-      storage: storageConfig,
-      keywordBlackList: [],
-      ...extraConfig
-    }
+    exports: configValue
   };
+}
 
+function loadStorageWithConfig(storageConfig, extraConfig = {}) {
+  const storageModulePath = path.join(repoRoot, 'modules', 'storage.js');
+  clearModule(storageModulePath);
+  injectConfig({
+    storage: storageConfig,
+    keywordBlackList: [],
+    auth: { statePath: './.tmp/tests/auth-storage.json' },
+    ...extraConfig
+  });
   return require(storageModulePath);
 }
 
@@ -65,6 +67,30 @@ function testJsonStorageRoundtrip() {
   assert.equal(storedRaw.mails.length, 1);
 }
 
+function testTransientMailDoesNotPersist() {
+  const filePath = path.join(tmpDir, 'transient.json');
+  fs.rmSync(filePath, { force: true });
+
+  const storage = loadStorageWithConfig({
+    path: './.tmp/tests/transient.json',
+    maxMailsPerInbox: 2,
+    mailTtlHours: 48,
+    maxBodyChars: 20
+  });
+
+  const transient = storage.createTransientMail('anon-1', {
+    headers: {
+      to: 'anon-1@example.com',
+      from: 'sender@example.com',
+      subject: 'Transient'
+    },
+    text: 'hello'
+  });
+
+  assert.equal(transient.subject, 'Transient');
+  assert.equal(fs.existsSync(filePath), false);
+}
+
 function testSqliteGuard() {
   const filePath = path.join(tmpDir, 'legacy.sqlite');
   fs.writeFileSync(filePath, 'SQLite format 3\0legacy');
@@ -83,19 +109,85 @@ function testSqliteGuard() {
 }
 
 function testUtils() {
+  injectConfig({ storage: { path: './.tmp/tests/utils.json' }, auth: { statePath: './.tmp/tests/auth-utils.json' }, keywordBlackList: [] });
   clearModule(path.join(repoRoot, 'modules', 'utils.js'));
-  const { isValidInboxName, sanitizeHtml } = require(path.join(repoRoot, 'modules', 'utils.js'));
+  const { isValidInboxName, sanitizeHtml, createAnonymousInboxId } = require(path.join(repoRoot, 'modules', 'utils.js'));
 
   assert.equal(isValidInboxName('demo_box', ['admin']), true);
   assert.equal(isValidInboxName('ad', ['admin']), true);
   assert.equal(isValidInboxName('Admin-box', ['admin']), false);
   assert.equal(isValidInboxName('x', []), false);
   assert.equal(isValidInboxName('bad/name', []), false);
+  assert(createAnonymousInboxId().startsWith('anon-'));
 
   const sanitized = sanitizeHtml('<div onclick="alert(1)"><script>alert(1)</script><a href="javascript:alert(2)">x</a></div>');
   assert(!sanitized.includes('<script'));
   assert(!sanitized.includes('onclick='));
   assert(!sanitized.includes('javascript:'));
+}
+
+function testAuthModule() {
+  const authStatePath = path.join(tmpDir, 'auth-state.json');
+  fs.rmSync(authStatePath, { force: true });
+
+  injectConfig({ auth: { ownerPassword: '', statePath: './.tmp/tests/auth-state.json', sessionTtlHours: 1 } });
+  clearModule(path.join(repoRoot, 'modules', 'auth.js'));
+  const auth = require(path.join(repoRoot, 'modules', 'auth.js'));
+
+  const info = auth.getAuthInfo();
+  assert(info.generatedPassword);
+  assert.equal(auth.verifyPassword(info.generatedPassword), true);
+
+  const session = auth.createSession();
+  assert(session.token);
+  assert(auth.getSession(session.token));
+  const cookie = auth.buildSetCookie(session.token, session.expiresAt);
+  assert(cookie.includes('fm_session='));
+
+  const req = { headers: { cookie: 'fm_session=' + encodeURIComponent(session.token) } };
+  assert.equal(auth.isOwnerRequest(req), true);
+
+  auth.changePassword('newpassword123');
+  const infoAfter = auth.getAuthInfo();
+  assert.equal(infoAfter.generatedPassword, '');
+  assert.equal(auth.verifyPassword('newpassword123'), true);
+  assert.throws(() => auth.changePassword('123'), /password too short/);
+
+  auth.clearSession(session.token);
+  assert.equal(auth.isOwnerRequest(req), false);
+}
+
+function testInboxesModule() {
+  injectConfig({ host: 'mail.test', auth: { statePath: './.tmp/tests/auth-inboxes.json' } });
+  clearModule(path.join(repoRoot, 'modules', 'inboxes.js'));
+  const inboxes = require(path.join(repoRoot, 'modules', 'inboxes.js'));
+
+  inboxes.bindSession('s1', 'anon-abc', 'anonymous');
+  let info = inboxes.getSessionInbox('s1');
+  assert.equal(info.mode, 'anonymous');
+  assert.equal(info.address, 'anon-abc@mail.test');
+
+  const transientMail = {
+    id: 11,
+    inbox: 'anon-abc',
+    subject: 'test',
+    mail_from: 'a@test',
+    mail_to: 'anon-abc@mail.test',
+    text_body: 'hello',
+    html_body: '',
+    headers_json: '{}',
+    received_at: new Date().toISOString()
+  };
+  inboxes.saveAnonymousMail('anon-abc', transientMail);
+  assert.equal(inboxes.listAnonymousMails('anon-abc').length, 1);
+  assert.equal(inboxes.getAnonymousMailById(11).subject, 'test');
+  assert.equal(inboxes.canAccessInbox('s1', 'anon-abc', false), true);
+  assert.equal(inboxes.canAccessInbox('other', 'anon-abc', false), false);
+
+  inboxes.bindSession('owner1', 'custombox', 'persistent');
+  info = inboxes.getSessionInbox('owner1');
+  assert.equal(info.mode, 'persistent');
+  assert.equal(inboxes.getInboxMode('custombox'), 'persistent');
 }
 
 function testSqliteMigrationScript() {
@@ -193,8 +285,11 @@ function testPatchScript() {
 
 try {
   testJsonStorageRoundtrip();
+  testTransientMailDoesNotPersist();
   testSqliteGuard();
   testUtils();
+  testAuthModule();
+  testInboxesModule();
   testSqliteMigrationScript();
   testPatchScript();
   console.log('ok');

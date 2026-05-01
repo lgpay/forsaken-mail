@@ -18,7 +18,7 @@
         <div>
           <div class="hero__eyebrow">临时邮箱 / Disposable Inbox</div>
           <h1>Forsaken Mail</h1>
-          <p>能实时收信，也能保留历史。拿来测试注册、验证码、回执邮件都很顺手。</p>
+          <p>匿名用户默认随机地址、不保留邮件；登录后可自定义前缀，并查看持久化历史。</p>
         </div>
       </div>
       <div class="hero__actions">
@@ -46,7 +46,7 @@
             <i class="refresh icon"></i>
             随机生成
           </button>
-          <button class="ui button basic small" id="customShortid">
+          <button class="ui button basic small" id="customShortid" disabled>
             <i class="edit icon"></i>
             自定义前缀
           </button>
@@ -55,7 +55,28 @@
       <div class="mailbox-card__meta">
         <div class="meta-chip"><span class="meta-chip__label">收件数</span><strong id="mailCount">0</strong></div>
         <div class="meta-chip"><span class="meta-chip__label">状态</span><strong id="connectionStatus">连接中</strong></div>
+        <div class="meta-chip"><span class="meta-chip__label">模式</span><strong id="inboxMode">匿名临时</strong></div>
         <div class="meta-chip"><span class="meta-chip__label">提示</span><span id="mailTip">新邮件会自动刷新显示</span></div>
+      </div>
+      <div class="owner-panel" id="ownerPanel">
+        <div class="owner-panel__status" id="ownerStatusText">未登录：只能使用随机前缀，邮件不会持久保存。</div>
+        <div class="owner-panel__generated" id="ownerGeneratedBox" style="display:none;"></div>
+        <div class="owner-panel__actions" id="ownerLoginForm">
+          <div class="ui small input">
+            <input type="password" id="ownerPassword" placeholder="输入管理密码">
+          </div>
+          <button class="ui small primary button" id="ownerLoginBtn">登录持久模式</button>
+        </div>
+        <div class="owner-panel__actions" id="ownerLogoutBox" style="display:none;">
+          <div class="ui small input">
+            <input type="password" id="ownerCurrentPassword" placeholder="当前密码">
+          </div>
+          <div class="ui small input">
+            <input type="password" id="ownerNewPassword" placeholder="新密码（至少 8 位）">
+          </div>
+          <button class="ui small primary button" id="ownerChangePasswordBtn">修改密码</button>
+          <button class="ui small button" id="ownerLogoutBtn">退出登录</button>
+        </div>
       </div>
     </section>
 
