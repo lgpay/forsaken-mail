@@ -146,11 +146,57 @@ function testSqliteMigrationScript() {
   assert.equal(migrated.mails[0].received_at, '2026-05-01T09:30:00.000Z');
 }
 
+function testPatchScript() {
+  const fixtureDir = path.join(tmpDir, 'patch-fixture');
+  const libDir = path.join(fixtureDir, 'node_modules', 'smtp-server', 'lib');
+  fs.rmSync(fixtureDir, { recursive: true, force: true });
+  fs.mkdirSync(libDir, { recursive: true });
+
+  fs.writeFileSync(path.join(libDir, 'smtp-stream.js'), [
+    'function SMTPStream() {',
+    '    this.closed = false;',
+    '}',
+    'SMTPStream.prototype._write = function () {',
+    '    if (this.closed) return;',
+    '    if (!this.closed) return true;',
+    '};',
+    'SMTPStream.prototype._flushData = function () {',
+    '    if (this._remainder && !this.closed) return;',
+    '};',
+    ''
+  ].join('\n'));
+
+  fs.writeFileSync(path.join(libDir, 'smtp-connection.js'), [
+    'SMTPConnection.prototype._onClose = function () {',
+    '    if (this._parser) {',
+    '        this._parser.closed = true;',
+    '    }',
+    '};',
+    ''
+  ].join('\n'));
+
+  execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'patch-smtp-stream.js')], {
+    cwd: fixtureDir,
+    stdio: 'pipe'
+  });
+
+  const patchedStream = fs.readFileSync(path.join(libDir, 'smtp-stream.js'), 'utf8');
+  const patchedConnection = fs.readFileSync(path.join(libDir, 'smtp-connection.js'), 'utf8');
+
+  assert(patchedStream.includes('this._openclawClosed = false;'));
+  assert(!patchedStream.includes('this.closed = false;'));
+  assert(patchedStream.includes('if (this._openclawClosed) return;'));
+  assert(patchedStream.includes('if (!this._openclawClosed) return true;'));
+  assert(patchedConnection.includes("if ('_openclawClosed' in this._parser)"));
+  assert(!patchedConnection.includes('this._parser.closed = true;'));
+}
+
 try {
   testJsonStorageRoundtrip();
   testSqliteGuard();
   testUtils();
   testSqliteMigrationScript();
+  testPatchScript();
   console.log('ok');
 } catch (error) {
   console.error(error && error.stack ? error.stack : error);

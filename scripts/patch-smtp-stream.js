@@ -3,13 +3,21 @@
 const fs = require('fs');
 const path = require('path');
 
-const targets = [
-  path.join(__dirname, '..', 'node_modules', 'smtp-server', 'lib', 'smtp-stream.js'),
-  path.join(__dirname, '..', 'node_modules', 'mailin', 'node_modules', 'smtp-server', 'lib', 'smtp-stream.js'),
-  path.join(__dirname, '..', 'node_modules', 'node-mailin', 'node_modules', 'smtp-server', 'lib', 'smtp-stream.js')
+const projectRoot = process.cwd();
+
+const smtpStreamTargets = [
+  path.join(projectRoot, 'node_modules', 'smtp-server', 'lib', 'smtp-stream.js'),
+  path.join(projectRoot, 'node_modules', 'mailin', 'node_modules', 'smtp-server', 'lib', 'smtp-stream.js'),
+  path.join(projectRoot, 'node_modules', 'node-mailin', 'node_modules', 'smtp-server', 'lib', 'smtp-stream.js')
 ];
 
-function patchFile(file) {
+const smtpConnectionTargets = [
+  path.join(projectRoot, 'node_modules', 'smtp-server', 'lib', 'smtp-connection.js'),
+  path.join(projectRoot, 'node_modules', 'mailin', 'node_modules', 'smtp-server', 'lib', 'smtp-connection.js'),
+  path.join(projectRoot, 'node_modules', 'node-mailin', 'node_modules', 'smtp-server', 'lib', 'smtp-connection.js')
+];
+
+function patchSmtpStream(file) {
   if (!fs.existsSync(file)) return false;
   let source = fs.readFileSync(file, 'utf8');
   let patched = source
@@ -24,9 +32,27 @@ function patchFile(file) {
   return false;
 }
 
-let touched = 0;
-for (const file of targets) {
-  if (patchFile(file)) touched++;
+function patchSmtpConnection(file) {
+  if (!fs.existsSync(file)) return false;
+  let source = fs.readFileSync(file, 'utf8');
+  let patched = source.replace(
+    /this\._parser\.closed = true;/g,
+    "if ('_openclawClosed' in this._parser) {\n        this._parser._openclawClosed = true;\n    }"
+  );
+
+  if (patched !== source) {
+    fs.writeFileSync(file, patched);
+    return true;
+  }
+  return false;
 }
 
-console.log(`smtp-stream patch applied to ${touched} file(s)`);
+let touched = 0;
+for (const file of smtpStreamTargets) {
+  if (patchSmtpStream(file)) touched++;
+}
+for (const file of smtpConnectionTargets) {
+  if (patchSmtpConnection(file)) touched++;
+}
+
+console.log(`smtp compatibility patch applied to ${touched} file(s)`);
