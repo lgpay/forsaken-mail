@@ -1,15 +1,34 @@
 Forsaken-Mail
 ==============
-一个适合自部署的临时邮箱服务，支持收信历史持久化。
+一个适合自部署的临时邮箱服务，支持 **匿名随机收件箱** 与 **owner 持久收件箱** 两种模式。
 
-[在线演示](http://disposable.dhc-app.com)
+- GitHub：<https://github.com/lgpay/forsaken-mail>
+- Docker Hub：<https://hub.docker.com/r/lgpay/forsaken-mail>
 
 ## 项目简介
 
 这个分支在原项目“偏演示”的基础上，往“能自用、能部署、能保留历史邮件”的方向做了二开。
 
-当前已经补上的能力：
+现在已经支持两种核心用法：
 
+### 1）匿名用户模式
+- 自动分配随机前缀
+- 可实时收信
+- 邮件**不持久化**
+- 更适合一次性注册、验证码测试、临时回执接收
+
+### 2）owner 持久模式
+- 首次启动自动生成随机 owner 密码
+- owner 登录后可自定义邮箱前缀
+- 邮件会持久保存
+- owner 可在 Web 界面里自行修改密码
+
+## 当前特性
+
+- 匿名随机 inbox
+- owner 持久 inbox
+- owner 登录 / 退出 / 修改密码
+- 首次启动自动生成 owner 密码
 - 邮件历史持久化
 - Inbox 历史列表 API
 - 邮件详情 API
@@ -19,6 +38,7 @@ Forsaken-Mail
 - TTL 过期清理
 - 旧版 SQLite 数据迁移到 JSON 的脚本
 - 存储异常检测与健康状态返回
+- Docker 多架构镜像（amd64 / arm64）
 
 ## 技术结构
 
@@ -29,15 +49,41 @@ Forsaken-Mail
 
 项目仍保留实时推送体验，同时通过 API 拉取历史邮件。
 
+---
+
 ## 快速开始
 
-### 1）安装依赖
+### 方式一：直接用 Docker Hub 镜像
+
+```bash
+docker pull lgpay/forsaken-mail:latest
+```
+
+运行：
+
+```bash
+docker run --name forsaken-mail -d \
+  -p 25:25 \
+  -p 3000:3000 \
+  -v /opt/forsaken-mail/data:/forsaken-mail/data \
+  lgpay/forsaken-mail:latest
+```
+
+浏览器打开：
+
+```bash
+http://localhost:3000
+```
+
+### 方式二：本地源码启动
+
+#### 1）安装依赖
 
 ```bash
 npm install
 ```
 
-### 2）修改配置
+#### 2）修改配置
 
 编辑 `config-default.json`：
 
@@ -57,6 +103,11 @@ npm install
     "mailTtlHours": 48,
     "maxBodyChars": 200000
   },
+  "auth": {
+    "ownerPassword": "",
+    "statePath": "./data/auth-state.json",
+    "sessionTtlHours": 168
+  },
   "host": "arm.3w.pm",
   "keywordBlackList": [
     "admin",
@@ -72,46 +123,62 @@ npm install
 }
 ```
 
-### 3）启动服务
+#### 3）启动服务
 
 ```bash
 npm start
 ```
 
-浏览器打开：
-
-```bash
-http://localhost:3000
-```
-
-### 4）运行测试
+#### 4）运行测试
 
 ```bash
 npm test
 ```
 
-## 存储与数据目录说明
+---
 
-当前代码使用的是 **JSON 文件存储**，但默认配置里的路径仍然写成：
+## 首次启动密码机制
 
-```bash
-./data/forsaken-mail.sqlite
+这是当前版本最重要的行为之一。
+
+### 如果没有现成认证状态文件
+服务首次启动时会：
+
+- 自动生成一枚随机 owner 密码
+- 把密码 hash 与状态写入 `auth.statePath`
+- 在启动日志里打印出这枚初始密码
+
+示例日志：
+
+```text
+[auth] Generated initial owner password: xxxxxxxxxxxxxx
+[auth] Stored auth state at: /forsaken-mail/data/auth-state.json
 ```
 
-注意：
+### 后续重启时
+只要 `auth-state.json` 还在，就不会重复生成新密码。
 
-虽然文件名还是 `.sqlite`，但**当前版本实际写入的是 JSON 内容**。这个命名主要是为了兼容旧部署，避免直接改路径时引入额外迁移步骤。
+### owner 修改密码后
+- 初始随机密码提示会消失
+- 后续以 owner 自己改过的密码为准
 
-### 为什么 Docker 一定要挂载数据目录
+---
 
-无论你以前用的是：
+## 为什么 Docker 一定要挂载数据目录
 
-- 旧版 SQLite
-- 当前版本的 JSON 文件存储
+无论你现在用的是：
 
-本质上都属于：**数据写在本地文件里**。
+- 匿名随机 inbox 的临时会话数据
+- owner 持久 inbox 的历史邮件
+- 自动生成的 owner 密码状态文件
 
-所以如果你用 Docker 部署，**一定要把容器内的数据目录映射到宿主机**，否则容器删除或重建后，邮件历史就会丢失。
+本质上都和本地文件状态有关。
+
+所以如果你用 Docker 部署，**一定要把容器内的数据目录映射到宿主机**，否则容器删除或重建后，下面这些都会出问题：
+
+- owner 密码状态丢失
+- 持久化邮件历史丢失
+- 迁移产物丢失
 
 ### 容器内数据目录
 
@@ -121,13 +188,7 @@ Dockerfile 当前工作目录是：
 /forsaken-mail
 ```
 
-默认存储路径是：
-
-```bash
-./data/forsaken-mail.sqlite
-```
-
-因此容器内实际数据目录是：
+默认数据目录是：
 
 ```bash
 /forsaken-mail/data
@@ -143,15 +204,23 @@ docker run --name forsaken-mail -d \
   lgpay/forsaken-mail:latest
 ```
 
-这样做的好处：
+---
 
-- 邮件历史不会因为容器重建而丢失
-- 便于备份和迁移
-- 后续从旧 SQLite 迁移到 JSON 也更顺手
+## 存储说明
+
+当前代码使用的是 **JSON 文件存储**，但默认配置里的路径仍然写成：
+
+```bash
+./data/forsaken-mail.sqlite
+```
+
+注意：
+
+虽然文件名还是 `.sqlite`，但**当前版本实际写入的是 JSON 内容**。这个命名主要是为了兼容旧部署，避免直接改路径时引入额外迁移步骤。
 
 ### 新部署建议
 
-如果是新部署，建议直接把配置改成 `.json` 文件名，避免误解：
+如果是新部署，建议直接把存储路径改成 `.json`，更清晰：
 
 ```json
 {
@@ -169,7 +238,7 @@ docker run --name forsaken-mail -d \
 - 在邮件相关 API 中返回 `503`
 - 明确提示你这是旧 SQLite，需要先迁移
 
-这样能避免“老数据还在，但界面像空邮箱”的坑。
+---
 
 ## SQLite 迁移到 JSON
 
@@ -191,7 +260,7 @@ npm run migrate:sqlite -- --from ./data/forsaken-mail.sqlite --to ./data/forsake
 - Inbox 数量
 - 生成后的 `nextId`
 
-### 推荐迁移流程
+推荐迁移流程：
 
 ```bash
 # 1. 把旧 SQLite 数据导出成 JSON
@@ -204,25 +273,69 @@ npm run migrate:sqlite -- --from ./data/forsaken-mail.sqlite --to ./data/forsake
 npm start
 ```
 
+---
+
+## 使用说明
+
+### 匿名模式
+默认进入匿名模式：
+
+- 系统自动分配随机前缀
+- 邮件不持久保存
+- 只适合当前会话临时查看
+
+### owner 模式
+登录 owner 后：
+
+- 可以自定义前缀
+- 邮件会持久保存
+- 可以查看历史邮件
+- 可以修改自己的密码
+
+---
+
 ## API 说明
 
 ### `GET /api/`
 
-健康检查 + 存储状态。
+健康检查 + 存储状态 + 认证状态。
 
-示例响应：
+### `GET /api/auth/status`
+
+获取当前登录状态与认证初始化信息。
+
+### `POST /api/auth/login`
+
+owner 登录。
+
+请求体示例：
 
 ```json
 {
-  "ok": true,
-  "storage": {
-    "path": "/forsaken-mail/data/forsaken-mail.json",
-    "blocked": false,
-    "format": "json",
-    "reason": ""
-  }
+  "password": "your-owner-password"
 }
 ```
+
+### `POST /api/auth/logout`
+
+owner 退出登录。
+
+### `POST /api/auth/change-password`
+
+owner 修改密码。
+
+请求体示例：
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-password-123"
+}
+```
+
+### `GET /api/session/inbox`
+
+获取当前匿名 / 持久 inbox 会话绑定信息。
 
 ### `GET /api/inboxes/:inbox/mails`
 
@@ -244,7 +357,7 @@ curl http://localhost:3000/api/inboxes/demo/mails
 curl http://localhost:3000/api/mails/1
 ```
 
-如果当前存储文件仍是旧版 SQLite，相关 API 会返回 `503`，并附带检测到的原因。
+---
 
 ## Inbox 命名规则
 
@@ -254,6 +367,8 @@ curl http://localhost:3000/api/mails/1
 - 只能包含 `a-z`、`0-9`、`.`、`_`、`-`
 - 长度 2 到 32 位
 - 不能包含 `keywordBlackList` 里的保留关键词
+
+---
 
 ## DNS 配置
 
@@ -274,37 +389,7 @@ curl http://localhost:3000/api/mails/1
 
 - <http://mxtoolbox.com/diagnostic.aspx>
 
-## Docker 使用
-
-### 构建镜像
-
-```bash
-docker build -t lgpay/forsaken-mail:latest .
-```
-
-### 运行容器（推荐带数据目录挂载）
-
-```bash
-docker run --name forsaken-mail -d \
-  -p 25:25 \
-  -p 3000:3000 \
-  -v /opt/forsaken-mail/data:/forsaken-mail/data \
-  lgpay/forsaken-mail:latest
-```
-
-### 直接拉取 Docker Hub 镜像
-
-```bash
-docker pull lgpay/forsaken-mail:latest
-```
-
-### 如果你只想临时体验
-
-也可以不挂载数据目录直接跑，但容器删掉后邮件历史会一起消失：
-
-```bash
-docker run --name forsaken-mail -d -p 25:25 -p 3000:3000 lgpay/forsaken-mail:latest
-```
+---
 
 ## 当前定位
 
