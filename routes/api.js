@@ -18,6 +18,12 @@ function getViewer(req) {
   };
 }
 
+function getRequestRuntimeHost(req) {
+  const hostHeader = String((req.headers && req.headers.host) || '').trim().toLowerCase();
+  if (!hostHeader) return '';
+  return hostHeader.split(':')[0];
+}
+
 router.get('/', function(req, res) {
   const storageStatus = storage.getStatus ? storage.getStatus() : { blocked: false };
   const viewer = getViewer(req);
@@ -25,7 +31,8 @@ router.get('/', function(req, res) {
     ok: !storageStatus.blocked,
     storage: storageStatus,
     viewer,
-    auth: auth.getAuthInfo()
+    auth: auth.getAuthInfo(),
+    host: inboxes.resolveHost(getRequestRuntimeHost(req))
   });
 });
 
@@ -33,7 +40,8 @@ router.get('/auth/status', function(req, res) {
   res.json({
     ok: true,
     isOwner: auth.isOwnerRequest(req),
-    auth: auth.getAuthInfo()
+    auth: auth.getAuthInfo(),
+    host: inboxes.resolveHost(getRequestRuntimeHost(req))
   });
 });
 
@@ -78,7 +86,7 @@ router.post('/auth/change-password', function(req, res) {
 
 router.get('/session/inbox', function(req, res) {
   const sessionId = String(req.headers['x-inbox-session'] || '').trim();
-  const current = inboxes.getSessionInbox(sessionId);
+  const current = inboxes.getSessionInbox(sessionId, getRequestRuntimeHost(req));
   res.json({ ok: true, inbox: current });
 });
 

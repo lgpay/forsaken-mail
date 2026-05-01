@@ -22,19 +22,27 @@ function getSocketOwner(socket) {
   return !!auth.getSession(token);
 }
 
+function getSocketRuntimeHost(socket) {
+  const hostHeader = String((socket.handshake && socket.handshake.headers && socket.handshake.headers.host) || '').trim().toLowerCase();
+  if (!hostHeader) return '';
+  return hostHeader.split(':')[0];
+}
+
 function bindSocketInbox(socket, inbox, mode) {
   if (socket.shortid) {
     onlines.delete(socket.shortid);
   }
   socket.shortid = inbox;
   socket.inboxMode = mode;
-  inboxes.bindSession(socket.id, inbox, mode);
+  socket.runtimeHost = getSocketRuntimeHost(socket);
+  inboxes.bindSession(socket.id, inbox, mode, socket.runtimeHost);
   onlines.set(inbox, socket);
   socket.emit('shortid', {
     inbox,
     mode,
-    address: inboxes.getAddress(inbox),
-    isOwner: !!socket.isOwner
+    address: inboxes.getAddress(inbox, socket.runtimeHost),
+    isOwner: !!socket.isOwner,
+    host: inboxes.resolveHost(socket.runtimeHost)
   });
 }
 
@@ -62,6 +70,7 @@ module.exports = function(io) {
 
   io.on('connection', socket => {
     socket.isOwner = getSocketOwner(socket);
+    socket.runtimeHost = getSocketRuntimeHost(socket);
 
     socket.on('request shortid', function() {
       let inbox = createAnonymousInboxId();

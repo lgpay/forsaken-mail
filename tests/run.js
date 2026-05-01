@@ -162,10 +162,15 @@ function testInboxesModule() {
   clearModule(path.join(repoRoot, 'modules', 'inboxes.js'));
   const inboxes = require(path.join(repoRoot, 'modules', 'inboxes.js'));
 
-  inboxes.bindSession('s1', 'anon-abc', 'anonymous');
+  inboxes.bindSession('s1', 'anon-abc', 'anonymous', 'auto.mail.test');
   let info = inboxes.getSessionInbox('s1');
   assert.equal(info.mode, 'anonymous');
-  assert.equal(info.address, 'anon-abc@mail.test');
+  assert.equal(info.address, 'anon-abc@auto.mail.test');
+
+  info = inboxes.getSessionInbox('s1', 'viewer.mail.test');
+  assert.equal(info.address, 'anon-abc@viewer.mail.test');
+  assert.equal(inboxes.getAddress('demo', 'current.example.com'), 'demo@current.example.com');
+  assert.equal(inboxes.getAddress('demo', ''), 'demo@mail.test');
 
   const transientMail = {
     id: 11,

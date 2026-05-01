@@ -6,12 +6,21 @@ const inboxes = new Map();
 const sessions = new Map();
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
 
-function getHost() {
-  return String(config.host || 'localhost');
+function getConfiguredHost() {
+  return String(config.host || '').trim();
 }
 
-function getAddress(inbox) {
-  return `${inbox}@${getHost()}`;
+function resolveHost(runtimeHost) {
+  const normalizedRuntime = String(runtimeHost || '').trim().toLowerCase();
+  if (normalizedRuntime) {
+    return normalizedRuntime;
+  }
+  const configured = getConfiguredHost();
+  return configured || 'localhost';
+}
+
+function getAddress(inbox, runtimeHost) {
+  return `${inbox}@${resolveHost(runtimeHost)}`;
 }
 
 function cleanup() {
@@ -74,12 +83,12 @@ function ensurePersistentInbox(inbox) {
   return entry;
 }
 
-function bindSession(sessionId, inbox, mode) {
+function bindSession(sessionId, inbox, mode, runtimeHost) {
   cleanup();
   unbindSession(sessionId);
   const entry = mode === 'persistent' ? ensurePersistentInbox(inbox) : ensureAnonymousInbox(inbox);
   entry.sessions.add(sessionId);
-  sessions.set(sessionId, { inbox, mode });
+  sessions.set(sessionId, { inbox, mode, host: resolveHost(runtimeHost) });
   return entry;
 }
 
@@ -97,16 +106,18 @@ function unbindSession(sessionId) {
   cleanup();
 }
 
-function getSessionInbox(sessionId) {
+function getSessionInbox(sessionId, runtimeHost) {
   cleanup();
   const current = sessions.get(sessionId);
   if (!current) return null;
   const entry = inboxes.get(current.inbox);
   if (!entry) return null;
+  const host = resolveHost(runtimeHost || current.host);
   return {
     inbox: entry.inbox,
     mode: entry.mode,
-    address: getAddress(entry.inbox)
+    address: getAddress(entry.inbox, host),
+    host
   };
 }
 
@@ -163,5 +174,6 @@ module.exports = {
   ensureAnonymousInbox,
   ensurePersistentInbox,
   getAddress,
+  resolveHost,
   cleanup
 };
