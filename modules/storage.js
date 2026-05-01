@@ -8,11 +8,56 @@ const storageConfig = config.storage || {};
 const dataDir = path.resolve(__dirname, '..', 'data');
 const storagePath = path.resolve(__dirname, '..', storageConfig.path || './data/forsaken-mail.json');
 const defaultState = { nextId: 1, mails: [] };
+const SQLITE_MAGIC = 'SQLite format 3';
 
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(path.dirname(storagePath), { recursive: true });
 
+function detectStorageMode() {
+  if (!fs.existsSync(storagePath)) {
+    return { blocked: false, format: 'json', reason: '' };
+  }
+
+  try {
+    const fd = fs.openSync(storagePath, 'r');
+    const buffer = Buffer.alloc(16);
+    const bytesRead = fs.readSync(fd, buffer, 0, 16, 0);
+    fs.closeSync(fd);
+    const prefix = buffer.slice(0, bytesRead).toString('utf8');
+
+    if (prefix.startsWith(SQLITE_MAGIC)) {
+      return {
+        blocked: true,
+        format: 'sqlite',
+        reason: 'Storage file is a legacy SQLite database, but the current build expects JSON storage. Please migrate or point storage.path to a JSON file.'
+      };
+    }
+  } catch (error) {
+    return {
+      blocked: true,
+      format: 'unknown',
+      reason: 'Failed to inspect storage file: ' + error.message
+    };
+  }
+
+  return { blocked: false, format: 'json', reason: '' };
+}
+
+const storageStatus = detectStorageMode();
+
+function ensureWritableStorage() {
+  if (!storageStatus.blocked) {
+    return;
+  }
+
+  const error = new Error(storageStatus.reason);
+  error.code = 'STORAGE_BLOCKED';
+  throw error;
+}
+
 function loadState() {
+  ensureWritableStorage();
+
   if (!fs.existsSync(storagePath)) {
     return { ...defaultState };
   }
@@ -29,9 +74,10 @@ function loadState() {
   }
 }
 
-let state = loadState();
+let state = storageStatus.blocked ? { ...defaultState } : loadState();
 
 function persist() {
+  ensureWritableStorage();
   const tempPath = storagePath + '.tmp';
   fs.writeFileSync(tempPath, JSON.stringify(state, null, 2));
   fs.renameSync(tempPath, storagePath);
@@ -74,6 +120,7 @@ function cleanupInboxInMemory(inbox) {
 }
 
 function saveMail(inbox, data) {
+  ensureWritableStorage();
   const headers = data && data.headers ? data.headers : {};
   const receivedAt = normalizeReceivedAt(headers);
 
@@ -100,6 +147,7 @@ function saveMail(inbox, data) {
 }
 
 function listMails(inbox) {
+  ensureWritableStorage();
   cleanupExpiredInMemory();
   persist();
   const maxMailsPerInbox = Number(storageConfig.maxMailsPerInbox || 100);
@@ -114,19 +162,29 @@ function listMails(inbox) {
 }
 
 function getMail(id) {
+  ensureWritableStorage();
   cleanupExpiredInMemory();
   persist();
   return state.mails.find(mail => mail.id === Number(id)) || null;
 }
 
 function cleanupExpired() {
+  ensureWritableStorage();
   cleanupExpiredInMemory();
   persist();
+}
+
+function getStatus() {
+  return {
+    path: storagePath,
+    ...storageStatus
+  };
 }
 
 module.exports = {
   saveMail,
   listMails,
   getMail,
-  cleanupExpired
+  cleanupExpired,
+  getStatus
 };

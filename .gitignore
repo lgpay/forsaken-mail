@@ -83,3 +83,6 @@ node_modules
 
 # Mailin tmp directory
 .tmp
+
+data/
+.image-tag

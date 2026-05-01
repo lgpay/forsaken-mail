@@ -11,10 +11,16 @@ let config = require('../modules/config');
 let { isValidInboxName, toMailSummary, toMailDetail } = require('../modules/utils');
 
 router.get('/', function(req, res) {
-  res.json({ ok: true });
+  const storageStatus = storage.getStatus ? storage.getStatus() : { blocked: false };
+  res.status(storageStatus.blocked ? 503 : 200).json({ ok: !storageStatus.blocked, storage: storageStatus });
 });
 
 router.get('/inboxes/:inbox/mails', function(req, res) {
+  const storageStatus = storage.getStatus ? storage.getStatus() : { blocked: false };
+  if (storageStatus.blocked) {
+    return res.status(503).json({ error: storageStatus.reason, storage: storageStatus });
+  }
+
   let inbox = String(req.params.inbox || '').trim().toLowerCase();
   if (!isValidInboxName(inbox, config.keywordBlackList)) {
     return res.status(400).json({ error: 'invalid inbox name' });
@@ -25,6 +31,11 @@ router.get('/inboxes/:inbox/mails', function(req, res) {
 });
 
 router.get('/mails/:id', function(req, res) {
+  const storageStatus = storage.getStatus ? storage.getStatus() : { blocked: false };
+  if (storageStatus.blocked) {
+    return res.status(503).json({ error: storageStatus.reason, storage: storageStatus });
+  }
+
   let mail = toMailDetail(storage.getMail(req.params.id));
   if (!mail) {
     return res.status(404).json({ error: 'mail not found' });

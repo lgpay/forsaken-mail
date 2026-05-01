@@ -1,32 +1,43 @@
 Forsaken-Mail
 ==============
-A self-hosted disposable mail service.
+A self-hosted disposable mail service with persisted inbox history.
 
 [Online Demo](http://disposable.dhc-app.com)
 
-## Quick-win redevelopment notes
+## What this fork adds
 
-This branch upgrades the original demo into a more practical self-hosted tool:
+This fork turns the original real-time demo into something more practical for personal/self-hosted use:
 
-- SQLite mail persistence
-- Inbox history API
-- Mail detail API
-- Inbox name validation
-- Basic HTML sanitization
-- Per-inbox mail retention limit
-- TTL-based mail cleanup
+- persisted inbox history
+- inbox history API
+- mail detail API
+- custom inbox name validation
+- basic HTML sanitization before rendering
+- per-inbox retention limit
+- TTL-based cleanup
+- legacy SQLite → JSON migration script
+- storage health reporting when legacy data blocks startup
 
-### Storage
+## Architecture
 
-Default storage path:
+- **SMTP ingest**: `mailin`
+- **Web/API**: Express + socket.io
+- **Storage**: JSON file storage
+- **Frontend**: static HTML + jQuery
+
+Real-time push is still preserved, while history is loaded through API calls.
+
+## Quick start
+
+### 1) Install dependencies
 
 ```bash
-./data/forsaken-mail.json
+npm install
 ```
 
-### Config
+### 2) Configure
 
-Edit `config-default.json`:
+Edit `config-default.json` as needed:
 
 ```json
 {
@@ -43,17 +54,150 @@ Edit `config-default.json`:
     "maxMailsPerInbox": 100,
     "mailTtlHours": 48,
     "maxBodyChars": 200000
+  },
+  "host": "arm.3w.pm",
+  "keywordBlackList": [
+    "admin",
+    "postmaster",
+    "system",
+    "webmaster",
+    "administrator",
+    "hostmaster",
+    "service",
+    "server",
+    "root"
+  ]
+}
+```
+
+### 3) Start the app
+
+```bash
+npm start
+```
+
+Open:
+
+```bash
+http://localhost:3000
+```
+
+### 4) Run checks
+
+```bash
+npm test
+```
+
+## Storage notes
+
+Current code uses **JSON file storage**.
+
+Default configured path is still:
+
+```bash
+./data/forsaken-mail.sqlite
+```
+
+That filename is kept mostly for backward compatibility with older deployments, but **the current implementation writes JSON into that path**.
+
+### Recommendation
+
+For new deployments, it is cleaner to change the path to a `.json` filename, for example:
+
+```json
+{
+  "storage": {
+    "path": "./data/forsaken-mail.json"
   }
 }
 ```
 
-### APIs
+### Legacy SQLite detection
 
-- `GET /api/` health check
-- `GET /api/inboxes/:inbox/mails` list inbox history
-- `GET /api/mails/:id` get mail detail
+If `storage.path` still points at an actual old SQLite database file, the app now:
 
-### Inbox rules
+- reports storage status from `GET /api/`
+- returns `503` from mail APIs
+- avoids silently treating the old database as an empty inbox
+
+This makes migration issues obvious instead of hiding them.
+
+## SQLite migration
+
+If you still have mail data in the old SQLite format, migrate it first:
+
+```bash
+npm run migrate:sqlite -- --from ./data/forsaken-mail.sqlite --to ./data/forsaken-mail.json
+```
+
+Useful flags:
+
+- `--force` overwrite an existing non-empty target JSON file
+- `--compact` write minified JSON
+- `--help` show usage
+
+The script prints a JSON summary with:
+
+- migrated mail count
+- inbox count
+- resulting `nextId`
+
+### Typical migration flow
+
+```bash
+# 1. Export old SQLite storage into JSON
+npm run migrate:sqlite -- --from ./data/forsaken-mail.sqlite --to ./data/forsaken-mail.json
+
+# 2. Update config to point to the JSON file
+#    storage.path = ./data/forsaken-mail.json
+
+# 3. Start the service again
+npm start
+```
+
+## APIs
+
+### `GET /api/`
+
+Health check and storage status.
+
+Example response:
+
+```json
+{
+  "ok": true,
+  "storage": {
+    "path": "/app/data/forsaken-mail.json",
+    "blocked": false,
+    "format": "json",
+    "reason": ""
+  }
+}
+```
+
+### `GET /api/inboxes/:inbox/mails`
+
+List inbox history.
+
+Example:
+
+```bash
+curl http://localhost:3000/api/inboxes/demo/mails
+```
+
+### `GET /api/mails/:id`
+
+Fetch mail detail.
+
+Example:
+
+```bash
+curl http://localhost:3000/api/mails/1
+```
+
+If storage is blocked because the configured file is still a legacy SQLite database, these APIs return `503` with the detected storage reason.
+
+## Inbox rules
 
 Custom inbox names must:
 
@@ -62,33 +206,59 @@ Custom inbox names must:
 - be 2 to 32 chars long
 - not include reserved keywords from `keywordBlackList`
 
-### Installation
+## DNS setup
 
-#### Setting up your DNS correctly
+To receive emails, your SMTP server must be reachable and correctly published in DNS.
 
-In order to receive emails, your smtp server address should be made available somewhere. Two records should be added to your DNS records. Let us pretend that we want to receive emails at `*@subdomain.domain.com`:
-- First an MX record: `subdomain.domain.com MX 10 mxsubdomain.domain.com`
-- Then an A record: `mxsubdomain.domain.com A the.ip.address.of.your.mailin.server`
+Assume you want to receive mail at:
 
-You can use an [smtp server tester](http://mxtoolbox.com/diagnostic.aspx) to verify that everything is correct.
-
-#### Let's Go
-
-general way:
-```bash
-npm install && npm start
+```text
+*@subdomain.domain.com
 ```
 
-if you want to run this inside a docker container
+Then configure:
+
+- MX record: `subdomain.domain.com MX 10 mxsubdomain.domain.com`
+- A record: `mxsubdomain.domain.com A <your-server-ip>`
+
+You can verify this with an SMTP / MX tester such as:
+
+- <http://mxtoolbox.com/diagnostic.aspx>
+
+## Docker
+
+Build:
+
 ```bash
 docker build -t denghongcai/forsaken-mail .
+```
+
+Run:
+
+```bash
 docker run --name forsaken-mail -d -p 25:25 -p 3000:3000 denghongcai/forsaken-mail
 ```
 
-Open your browser and type in
-```bash
-http://localhost:3000
-```
+## Project status
 
-Enjoy!
+This is still a lightweight self-hosted disposable mailbox project, not a hardened large-scale mail platform.
 
+Already improved:
+
+- persisted history
+- basic validation
+- cleanup limits
+- migration tooling
+- startup/storage diagnostics
+
+Still reasonable future work:
+
+- attachment support
+- rate limiting / abuse controls
+- multi-domain support
+- admin view
+- production deployment polish
+
+## License
+
+GPL-2.0

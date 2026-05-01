@@ -10,6 +10,7 @@ let path = require('path');
 let app = require(path.join(__dirname, '..', 'app'));
 let config = require(path.join(__dirname, '..', 'modules/config'));
 let mailin = require(path.join(__dirname, '..', 'modules/mailin'));
+let storage = require(path.join(__dirname, '..', 'modules/storage'));
 let ioApp = require(path.join(__dirname, '..', 'modules/io'));
 let debug = require('debug')('server');
 let io = require('socket.io');
@@ -21,6 +22,11 @@ let http = require('http');
 
 let port = normalizePort(process.env.PORT || String((config.web && config.web.port) || '3000'));
 app.set('port', port);
+
+const storageStatus = storage.getStatus ? storage.getStatus() : { blocked: false };
+if (storageStatus.blocked) {
+  console.error('[storage] ' + storageStatus.reason + ' path=' + storageStatus.path);
+}
 
 mailin.start(config.mailin);
 
