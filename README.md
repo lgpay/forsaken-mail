@@ -90,11 +90,9 @@ http://localhost:3000
 npm test
 ```
 
-## 存储说明
+## 存储与数据目录说明
 
-当前代码使用的是 **JSON 文件存储**。
-
-默认配置里的路径仍然是：
+当前代码使用的是 **JSON 文件存储**，但默认配置里的路径仍然写成：
 
 ```bash
 ./data/forsaken-mail.sqlite
@@ -102,11 +100,58 @@ npm test
 
 注意：
 
-虽然文件名还叫 `.sqlite`，但**当前实现实际写入的是 JSON 内容**。这个命名主要是为了兼容旧部署，避免直接改路径带来额外迁移成本。
+虽然文件名还是 `.sqlite`，但**当前版本实际写入的是 JSON 内容**。这个命名主要是为了兼容旧部署，避免直接改路径时引入额外迁移步骤。
 
-### 推荐做法
+### 为什么 Docker 一定要挂载数据目录
 
-如果是新部署，建议你把存储路径直接改成 `.json`，更清晰：
+无论你以前用的是：
+
+- 旧版 SQLite
+- 当前版本的 JSON 文件存储
+
+本质上都属于：**数据写在本地文件里**。
+
+所以如果你用 Docker 部署，**一定要把容器内的数据目录映射到宿主机**，否则容器删除或重建后，邮件历史就会丢失。
+
+### 容器内数据目录
+
+Dockerfile 当前工作目录是：
+
+```bash
+/forsaken-mail
+```
+
+默认存储路径是：
+
+```bash
+./data/forsaken-mail.sqlite
+```
+
+因此容器内实际数据目录是：
+
+```bash
+/forsaken-mail/data
+```
+
+### 推荐挂载方式
+
+```bash
+docker run --name forsaken-mail -d \
+  -p 25:25 \
+  -p 3000:3000 \
+  -v /opt/forsaken-mail/data:/forsaken-mail/data \
+  lgpay/forsaken-mail:latest
+```
+
+这样做的好处：
+
+- 邮件历史不会因为容器重建而丢失
+- 便于备份和迁移
+- 后续从旧 SQLite 迁移到 JSON 也更顺手
+
+### 新部署建议
+
+如果是新部署，建议直接把配置改成 `.json` 文件名，避免误解：
 
 ```json
 {
@@ -124,7 +169,7 @@ npm test
 - 在邮件相关 API 中返回 `503`
 - 明确提示你这是旧 SQLite，需要先迁移
 
-这样能避免“老数据明明还在，但界面看起来像空邮箱”的坑。
+这样能避免“老数据还在，但界面像空邮箱”的坑。
 
 ## SQLite 迁移到 JSON
 
@@ -171,7 +216,7 @@ npm start
 {
   "ok": true,
   "storage": {
-    "path": "/app/data/forsaken-mail.json",
+    "path": "/forsaken-mail/data/forsaken-mail.json",
     "blocked": false,
     "format": "json",
     "reason": ""
@@ -231,16 +276,34 @@ curl http://localhost:3000/api/mails/1
 
 ## Docker 使用
 
-构建镜像：
+### 构建镜像
 
 ```bash
-docker build -t denghongcai/forsaken-mail .
+docker build -t lgpay/forsaken-mail:latest .
 ```
 
-运行容器：
+### 运行容器（推荐带数据目录挂载）
 
 ```bash
-docker run --name forsaken-mail -d -p 25:25 -p 3000:3000 denghongcai/forsaken-mail
+docker run --name forsaken-mail -d \
+  -p 25:25 \
+  -p 3000:3000 \
+  -v /opt/forsaken-mail/data:/forsaken-mail/data \
+  lgpay/forsaken-mail:latest
+```
+
+### 直接拉取 Docker Hub 镜像
+
+```bash
+docker pull lgpay/forsaken-mail:latest
+```
+
+### 如果你只想临时体验
+
+也可以不挂载数据目录直接跑，但容器删掉后邮件历史会一起消失：
+
+```bash
+docker run --name forsaken-mail -d -p 25:25 -p 3000:3000 lgpay/forsaken-mail:latest
 ```
 
 ## 当前定位
