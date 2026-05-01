@@ -108,7 +108,7 @@ npm install
     "statePath": "./data/auth-state.json",
     "sessionTtlHours": 168
   },
-  "host": "arm.3w.pm",
+  "host": "mail.example.com",
   "keywordBlackList": [
     "admin",
     "postmaster",
