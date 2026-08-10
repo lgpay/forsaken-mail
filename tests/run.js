@@ -200,7 +200,20 @@ function testAuthModule() {
   assert(cookie.includes('Secure'));
   assert(cookie.includes('SameSite=Strict'));
 
-  const req = { headers: { cookie: 'fm_session=' + encodeURIComponent(session.token) }, secure: true };
+  const insecureCookieConfig = { auth: { ownerPassword: 'initialpassword123', statePath: './.tmp/tests/auth-state.json', sessionTtlHours: 1, requireHttps: false } };
+  injectConfig(insecureCookieConfig);
+  clearModule(path.join(repoRoot, 'modules', 'auth.js'));
+  auth = require(path.join(repoRoot, 'modules', 'auth.js'));
+  const insecureSession = auth.createSession();
+  const insecureCookie = auth.buildSetCookie(insecureSession.token, insecureSession.expiresAt);
+  assert(!insecureCookie.includes('Secure'));
+  assert(!auth.buildClearCookie().includes('Secure'));
+
+  injectConfig({ auth: { ownerPassword: 'initialpassword123', statePath: './.tmp/tests/auth-state.json', sessionTtlHours: 1, requireHttps: true } });
+  clearModule(path.join(repoRoot, 'modules', 'auth.js'));
+  auth = require(path.join(repoRoot, 'modules', 'auth.js'));
+  const secureSession = auth.createSession();
+  const req = { headers: { cookie: 'fm_session=' + encodeURIComponent(secureSession.token) }, secure: true };
   assert.equal(auth.isOwnerRequest(req), true);
   assert.equal(auth.isSecureRequest(req), true);
   assert.equal(auth.isSecureRequest({ secure: false }), false);
@@ -209,7 +222,7 @@ function testAuthModule() {
   assert.equal(auth.verifyPassword('newpassword123'), true);
   assert.throws(() => auth.changePassword('123'), /password too short/);
 
-  auth.clearSession(session.token);
+  auth.clearSession(secureSession.token);
   assert.equal(auth.isOwnerRequest(req), false);
 
   fs.writeFileSync(authStatePath, JSON.stringify({ passwordHash: crypto.createHash('sha256').update('legacy-password').digest('hex') }));

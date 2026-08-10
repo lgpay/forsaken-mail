@@ -17,7 +17,7 @@
     "ownerPassword": "",
     "statePath": "./data/auth-state.json",
     "sessionTtlHours": 168,
-    "requireHttps": true,
+    "requireHttps": false,
     "trustProxy": false
   },
   "host": "mail.example.com",

@@ -220,16 +220,21 @@ function buildSetCookie(token, expiresAt) {
   const parts = [
     'fm_session=' + encodeURIComponent(token),
     'Path=/',
-    'HttpOnly',
-    'Secure',
+    'HttpOnly'
+  ];
+  if (requireHttps()) parts.push('Secure');
+  parts.push(
     'SameSite=Strict',
     'Max-Age=' + Math.floor((expiresAt - Date.now()) / 1000)
-  ];
+  );
   return parts.join('; ');
 }
 
 function buildClearCookie() {
-  return 'fm_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0';
+  const parts = ['fm_session=', 'Path=/', 'HttpOnly'];
+  if (requireHttps()) parts.push('Secure');
+  parts.push('SameSite=Strict', 'Max-Age=0');
+  return parts.join('; ');
 }
 
 module.exports = {
