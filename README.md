@@ -18,7 +18,7 @@ Forsaken-Mail
 - 更适合一次性注册、验证码测试、临时回执接收
 
 ### 2）owner 持久模式
-- 首次启动自动生成随机 owner 密码
+- 启动前必须配置 owner 密码
 - owner 登录后可自定义邮箱前缀
 - 邮件会持久保存
 - owner 可在 Web 界面里自行修改密码
@@ -28,7 +28,7 @@ Forsaken-Mail
 - 匿名随机 inbox
 - owner 持久 inbox
 - owner 登录 / 退出 / 修改密码
-- 首次启动自动生成 owner 密码
+- scrypt 密码哈希与旧版 SHA-256 登录后迁移
 - 邮件历史持久化
 - Inbox 历史列表 API
 - 邮件详情 API
@@ -65,6 +65,7 @@ docker pull lgpay/forsaken-mail:latest
 docker run --name forsaken-mail -d \
   -p 25:25 \
   -p 3000:3000 \
+  -e OWNER_PASSWORD='请替换为至少 8 位的强密码' \
   -v /opt/forsaken-mail/data:/forsaken-mail/data \
   lgpay/forsaken-mail:latest
 ```
@@ -83,45 +84,38 @@ http://localhost:3000
 npm install
 ```
 
-#### 2）修改配置
+#### 2）配置 owner 密码
 
-编辑 `config-default.json`：
+首次启动且不存在 `auth.statePath` 指向的状态文件时，必须提供非空 owner 密码。推荐使用环境变量，避免把真实密码写入仓库中的配置文件：
 
-```json
-{
-  "mailin": {
-    "host": "0.0.0.0",
-    "port": 25,
-    "disableWebhook": true
-  },
-  "web": {
-    "port": 3000
-  },
-  "storage": {
-    "path": "./data/forsaken-mail.sqlite",
-    "maxMailsPerInbox": 100,
-    "mailTtlHours": 48,
-    "maxBodyChars": 200000
-  },
-  "auth": {
-    "ownerPassword": "",
-    "statePath": "./data/auth-state.json",
-    "sessionTtlHours": 168
-  },
-  "host": "mail.example.com",
-  "keywordBlackList": [
-    "admin",
-    "postmaster",
-    "system",
-    "webmaster",
-    "administrator",
-    "hostmaster",
-    "service",
-    "server",
-    "root"
-  ]
-}
+```bash
+export OWNER_PASSWORD='请替换为至少 8 位的强密码'
+npm start
 ```
+
+如果需要兼容原有配置方式，也可以在 `config-default.json` 的 `auth.ownerPassword` 中填写密码。运行时密码来源优先级为：
+
+1. `OWNER_PASSWORD_FILE`（优先，适合 Docker Secret）
+2. `OWNER_PASSWORD`
+3. `auth.ownerPassword`
+
+`OWNER_PASSWORD_FILE` 的内容按 UTF-8 读取并去除首尾空白。密码不会写入镜像，服务只将 scrypt 密码哈希保存到 `auth.statePath`。已有状态文件时不会因环境变量变化自动修改密码；请使用 Web 的改密功能。
+
+生产环境建议使用 Docker Secret，并将 `OWNER_PASSWORD_FILE` 指向 Secret 文件，例如：
+
+```bash
+docker secret create forsaken_mail_owner_password ./owner-password.txt
+docker service create \
+  --name forsaken-mail \
+  --publish published=25,target=25 \
+  --publish published=3000,target=3000 \
+  --mount type=bind,source=/opt/forsaken-mail/data,target=/forsaken-mail/data \
+  --secret source=forsaken_mail_owner_password,target=owner_password \
+  -e OWNER_PASSWORD_FILE=/run/secrets/owner_password \
+  lgpay/forsaken-mail:latest
+```
+
+`owner-password.txt` 不应提交到 Git。
 
 #### 3）启动服务
 
@@ -137,30 +131,13 @@ npm test
 
 ---
 
-## 首次启动密码机制
+## Owner 密码与 HTTPS
 
-这是当前版本最重要的行为之一。
+首次启动时必须通过上述密码来源之一配置至少 8 位的强 owner 密码。服务只将使用 scrypt 生成的密码哈希写入 `auth.statePath`，不会输出、保存或通过 API 返回明文密码。
 
-### 如果没有现成认证状态文件
-服务首次启动时会：
+旧版 `auth-state.json` 中的 SHA-256 哈希会在首次成功登录后自动升级为 scrypt；失败登录不会改写旧记录。
 
-- 自动生成一枚随机 owner 密码
-- 把密码 hash 与状态写入 `auth.statePath`
-- 在启动日志里打印出这枚初始密码
-
-示例日志：
-
-```text
-[auth] Generated initial owner password: xxxxxxxxxxxxxx
-[auth] Stored auth state at: /forsaken-mail/data/auth-state.json
-```
-
-### 后续重启时
-只要 `auth-state.json` 还在，就不会重复生成新密码。
-
-### owner 修改密码后
-- 初始随机密码提示会消失
-- 后续以 owner 自己改过的密码为准
+默认 `auth.requireHttps` 为 `true`：owner 登录、退出、改密及 owner 已登录的邮件访问都要求 HTTPS，且会话 Cookie 带有 `Secure`、`HttpOnly`、`SameSite=Strict`。在反向代理终止 TLS 时，明确将 `auth.trustProxy` 配置为受信任代理跳数（例如 `1`）；不要在公网部署中关闭 HTTPS 要求。仅本地开发可设置 `auth.requireHttps: false`，这会降低认证安全性。
 
 ---
 
@@ -200,6 +177,7 @@ Dockerfile 当前工作目录是：
 docker run --name forsaken-mail -d \
   -p 25:25 \
   -p 3000:3000 \
+  -e OWNER_PASSWORD='请替换为至少 8 位的强密码' \
   -v /opt/forsaken-mail/data:/forsaken-mail/data \
   lgpay/forsaken-mail:latest
 ```

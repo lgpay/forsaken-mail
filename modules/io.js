@@ -28,14 +28,22 @@ function getSocketRuntimeHost(socket) {
   return hostHeader.split(':')[0];
 }
 
+function getSocketInboxSession(socket) {
+  const query = socket && socket.handshake && socket.handshake.query;
+  const value = query && (query.inboxSession || query.inbox_session);
+  const sessionId = String(value || '').trim();
+  return /^[a-z0-9][a-z0-9._:-]{7,127}$/i.test(sessionId) ? sessionId : socket.id;
+}
+
 function bindSocketInbox(socket, inbox, mode) {
   if (socket.shortid) {
     onlines.delete(socket.shortid);
   }
   socket.shortid = inbox;
   socket.inboxMode = mode;
+  socket.inboxSessionId = socket.inboxSessionId || getSocketInboxSession(socket);
   socket.runtimeHost = getSocketRuntimeHost(socket);
-  inboxes.bindSession(socket.id, inbox, mode, socket.runtimeHost);
+  inboxes.bindSession(socket.inboxSessionId, inbox, mode, socket.runtimeHost, socket.id);
   onlines.set(inbox, socket);
   socket.emit('shortid', {
     inbox,
@@ -70,6 +78,7 @@ module.exports = function(io) {
 
   io.on('connection', socket => {
     socket.isOwner = getSocketOwner(socket);
+    socket.inboxSessionId = getSocketInboxSession(socket);
     socket.runtimeHost = getSocketRuntimeHost(socket);
 
     socket.on('request shortid', function() {
@@ -98,7 +107,7 @@ module.exports = function(io) {
       if (socket.shortid) {
         onlines.delete(socket.shortid);
       }
-      inboxes.unbindSession(socket.id);
+      inboxes.unbindSession(socket.inboxSessionId, socket.id);
     });
   });
 };

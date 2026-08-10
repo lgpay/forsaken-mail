@@ -25,7 +25,6 @@ $(function() {
   var $viewRawBtn = $('#viewRawBtn');
   var $inboxMode = $('#inboxMode');
   var $ownerStatusText = $('#ownerStatusText');
-  var $ownerGeneratedBox = $('#ownerGeneratedBox');
   var $ownerLoginForm = $('#ownerLoginForm');
   var $ownerLogoutBox = $('#ownerLogoutBox');
   var $ownerPassword = $('#ownerPassword');
@@ -96,14 +95,6 @@ $(function() {
   function refreshOwnerUi() {
     $customShortId.prop('disabled', !isOwner);
 
-    if (authInfo && authInfo.generatedPassword) {
-      $ownerGeneratedBox
-        .html('首次启动已生成随机 owner 密码：<code>' + escapeHtml(authInfo.generatedPassword) + '</code>，请尽快登录后修改。')
-        .show();
-    } else {
-      $ownerGeneratedBox.hide().empty();
-    }
-
     if (isOwner) {
       $ownerStatusText.text('已登录：你现在可以设置自定义前缀，并保留历史邮件。');
       $ownerLoginForm.hide();
@@ -139,6 +130,26 @@ $(function() {
     $maillist.find('.mail-item[data-id="' + id + '"]').addClass('is-active');
   }
 
+  function buildMailDocument(html) {
+    return '<!doctype html><html><head>' +
+      '<meta charset="utf-8">' +
+      '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\';">' +
+      '<meta name="referrer" content="no-referrer">' +
+      '<base target="_blank">' +
+      '<style>html,body{margin:0;padding:0;overflow-wrap:anywhere}img,table{max-width:100%!important;height:auto!important}table{border-collapse:collapse}</style>' +
+      '</head><body>' + html + '</body></html>';
+  }
+
+  function renderMailHtml(html) {
+    var frame = document.createElement('iframe');
+    frame.className = 'mail-body__frame';
+    frame.setAttribute('sandbox', '');
+    frame.setAttribute('referrerpolicy', 'no-referrer');
+    frame.setAttribute('title', '邮件 HTML 正文（隔离显示）');
+    frame.srcdoc = buildMailDocument(html);
+    $mailBody.empty().append(frame);
+  }
+
   function renderMailDetail(mail) {
     currentMailId = mail.id;
     $mailSubject.text(mail.subject || '无主题');
@@ -148,9 +159,9 @@ $(function() {
     $viewRawBtn.prop('disabled', false);
 
     if (mail.html) {
-      $mailBody.html(mail.html);
+      renderMailHtml(mail.html);
     } else {
-      $mailBody.html($('<pre>').text(mail.text || ''));
+      $mailBody.empty().append($('<pre>').text(mail.text || ''));
     }
 
     $('#raw .header').text('邮件原始数据');
@@ -351,7 +362,9 @@ $(function() {
     $mailTip.text('复制失败，请手动复制');
   });
 
-  var socket = io();
+  var socket = io({
+    query: 'inboxSession=' + encodeURIComponent(inboxSessionId)
+  });
 
   socket.on('connect', function() {
     setConnectionStatus('已连接');

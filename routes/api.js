@@ -12,6 +12,12 @@ let auth = require('../modules/auth');
 let inboxes = require('../modules/inboxes');
 let { isValidInboxName, toMailSummary, toMailDetail } = require('../modules/utils');
 
+function requireSecureTransport(req, res) {
+  if (auth.isSecureRequest(req)) return true;
+  res.status(400).json({ error: 'HTTPS is required for owner authentication' });
+  return false;
+}
+
 function getViewer(req) {
   return {
     isOwner: auth.isOwnerRequest(req)
@@ -46,6 +52,7 @@ router.get('/auth/status', function(req, res) {
 });
 
 router.post('/auth/login', function(req, res) {
+  if (!requireSecureTransport(req, res)) return;
   const password = req.body && req.body.password;
   if (!auth.verifyPassword(password)) {
     return res.status(401).json({ error: 'invalid password' });
@@ -57,6 +64,7 @@ router.post('/auth/login', function(req, res) {
 });
 
 router.post('/auth/logout', function(req, res) {
+  if (!requireSecureTransport(req, res)) return;
   const session = auth.getSessionFromRequest(req);
   if (session) {
     auth.clearSession(session.token);
@@ -66,6 +74,7 @@ router.post('/auth/logout', function(req, res) {
 });
 
 router.post('/auth/change-password', function(req, res) {
+  if (!requireSecureTransport(req, res)) return;
   if (!auth.isOwnerRequest(req)) {
     return res.status(403).json({ error: 'forbidden' });
   }
@@ -91,6 +100,7 @@ router.get('/session/inbox', function(req, res) {
 });
 
 router.get('/inboxes/:inbox/mails', function(req, res) {
+  if (auth.isOwnerRequest(req) && !requireSecureTransport(req, res)) return;
   let inbox = String(req.params.inbox || '').trim().toLowerCase();
   if (!isValidInboxName(inbox, config.keywordBlackList)) {
     return res.status(400).json({ error: 'invalid inbox name' });
@@ -117,6 +127,7 @@ router.get('/inboxes/:inbox/mails', function(req, res) {
 });
 
 router.get('/mails/:id', function(req, res) {
+  if (auth.isOwnerRequest(req) && !requireSecureTransport(req, res)) return;
   const sessionId = String(req.headers['x-inbox-session'] || '').trim();
   const isOwner = auth.isOwnerRequest(req);
 

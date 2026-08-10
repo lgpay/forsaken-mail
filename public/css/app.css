@@ -442,6 +442,14 @@ body > .ui.modal {
     max-width: 100%;
 }
 
+.mail-body__frame {
+    display: block;
+    width: 100%;
+    min-height: 420px;
+    border: 0;
+    background: #ffffff;
+}
+
 .mail-body table {
     border-collapse: collapse;
 }

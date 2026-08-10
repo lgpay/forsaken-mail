@@ -8,6 +8,9 @@ const config = require('./config');
 const authConfig = config.auth || {};
 const sessions = new Map();
 const statePath = path.resolve(__dirname, '..', authConfig.statePath || './data/auth-state.json');
+const LEGACY_SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+const SCRYPT_PREFIX = 'scrypt$';
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, keylen: 64, maxmem: 32 * 1024 * 1024 };
 fs.mkdirSync(path.dirname(statePath), { recursive: true });
 
 function getCookie(req, name) {
@@ -27,53 +30,87 @@ function sha256(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
-function generatePassword() {
-  return crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 14);
+function safeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left));
+  const rightBuffer = Buffer.from(String(right));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function createPasswordHash(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(String(password), salt, SCRYPT_PARAMS.keylen, SCRYPT_PARAMS);
+  return [
+    'scrypt',
+    SCRYPT_PARAMS.N,
+    SCRYPT_PARAMS.r,
+    SCRYPT_PARAMS.p,
+    salt.toString('base64'),
+    hash.toString('base64')
+  ].join('$');
+}
+
+function verifyScryptPassword(password, record) {
+  const parts = String(record || '').split('$');
+  if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
+
+  const [_, nValue, rValue, pValue, saltValue, hashValue] = parts;
+  const N = Number(nValue);
+  const r = Number(rValue);
+  const p = Number(pValue);
+  if (!Number.isSafeInteger(N) || !Number.isSafeInteger(r) || !Number.isSafeInteger(p) || N < 2 || r < 1 || p < 1) {
+    return false;
+  }
+
+  try {
+    const salt = Buffer.from(saltValue, 'base64');
+    const expected = Buffer.from(hashValue, 'base64');
+    if (!salt.length || !expected.length) return false;
+    const actual = crypto.scryptSync(String(password), salt, expected.length, {
+      N,
+      r,
+      p,
+      maxmem: Math.max(32 * 1024 * 1024, 128 * N * r + 1024 * 1024)
+    });
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  } catch (_) {
+    return false;
+  }
+}
+
+function normalizeState(parsed) {
+  if (!parsed || !parsed.passwordHash) return null;
+  return {
+    passwordHash: String(parsed.passwordHash),
+    passwordChangedAt: parsed.passwordChangedAt || null,
+    generatedAt: parsed.generatedAt || null
+  };
 }
 
 function loadState() {
   if (fs.existsSync(statePath)) {
     try {
-      const parsed = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      if (parsed && parsed.passwordHash) {
-        return {
-          passwordHash: String(parsed.passwordHash),
-          generatedPassword: parsed.generatedPassword ? String(parsed.generatedPassword) : '',
-          passwordChangedAt: parsed.passwordChangedAt || null,
-          generatedAt: parsed.generatedAt || null
-        };
-      }
+      const state = normalizeState(JSON.parse(fs.readFileSync(statePath, 'utf8')));
+      if (state) return state;
     } catch (_) {}
   }
 
   const configured = String(authConfig.ownerPassword || '').trim();
-  if (configured) {
-    const state = {
-      passwordHash: sha256(configured),
-      generatedPassword: '',
-      passwordChangedAt: new Date().toISOString(),
-      generatedAt: null
-    };
-    persistState(state);
-    return state;
+  if (!configured) {
+    throw new Error('Owner password is not configured. Set OWNER_PASSWORD_FILE, OWNER_PASSWORD, or auth.ownerPassword before starting the service.');
   }
 
-  const generatedPassword = generatePassword();
   const state = {
-    passwordHash: sha256(generatedPassword),
-    generatedPassword,
-    passwordChangedAt: null,
-    generatedAt: new Date().toISOString()
+    passwordHash: createPasswordHash(configured),
+    passwordChangedAt: new Date().toISOString(),
+    generatedAt: null
   };
   persistState(state);
-  console.log('[auth] Generated initial owner password:', generatedPassword);
-  console.log('[auth] Stored auth state at:', statePath);
   return state;
 }
 
-function persistState(state) {
+function persistState(nextState) {
   const tempPath = statePath + '.tmp';
-  fs.writeFileSync(tempPath, JSON.stringify(state, null, 2));
+  fs.writeFileSync(tempPath, JSON.stringify(nextState, null, 2));
   fs.renameSync(tempPath, statePath);
 }
 
@@ -129,7 +166,22 @@ function isOwnerRequest(req) {
 }
 
 function verifyPassword(password) {
-  return sha256(String(password || '')) === state.passwordHash;
+  const storedHash = state.passwordHash;
+  if (storedHash.startsWith(SCRYPT_PREFIX)) {
+    return verifyScryptPassword(password, storedHash);
+  }
+
+  if (!LEGACY_SHA256_PATTERN.test(storedHash)) return false;
+  const valid = safeEqual(sha256(String(password || '')), storedHash);
+  if (valid) {
+    state = {
+      passwordHash: createPasswordHash(String(password || '')),
+      passwordChangedAt: state.passwordChangedAt || new Date().toISOString(),
+      generatedAt: state.generatedAt || null
+    };
+    persistState(state);
+  }
+  return valid;
 }
 
 function changePassword(newPassword) {
@@ -141,10 +193,9 @@ function changePassword(newPassword) {
   }
 
   state = {
-    passwordHash: sha256(normalized),
-    generatedPassword: '',
+    passwordHash: createPasswordHash(normalized),
     passwordChangedAt: new Date().toISOString(),
-    generatedAt: state.generatedAt || new Date().toISOString()
+    generatedAt: state.generatedAt || null
   };
   persistState(state);
   return getAuthInfo();
@@ -153,11 +204,16 @@ function changePassword(newPassword) {
 function getAuthInfo() {
   return {
     statePath,
-    hasConfiguredPassword: !state.generatedPassword,
-    generatedPassword: state.generatedPassword || '',
-    generatedAt: state.generatedAt || null,
     passwordChangedAt: state.passwordChangedAt || null
   };
+}
+
+function requireHttps() {
+  return authConfig.requireHttps !== false;
+}
+
+function isSecureRequest(req) {
+  return !requireHttps() || !!(req && req.secure);
 }
 
 function buildSetCookie(token, expiresAt) {
@@ -165,14 +221,15 @@ function buildSetCookie(token, expiresAt) {
     'fm_session=' + encodeURIComponent(token),
     'Path=/',
     'HttpOnly',
-    'SameSite=Lax',
+    'Secure',
+    'SameSite=Strict',
     'Max-Age=' + Math.floor((expiresAt - Date.now()) / 1000)
   ];
   return parts.join('; ');
 }
 
 function buildClearCookie() {
-  return 'fm_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
+  return 'fm_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0';
 }
 
 module.exports = {
@@ -186,5 +243,7 @@ module.exports = {
   getAuthInfo,
   buildSetCookie,
   buildClearCookie,
-  cleanupExpiredSessions
+  cleanupExpiredSessions,
+  isSecureRequest,
+  requireHttps
 };

@@ -1,5 +1,6 @@
 const assert = require('assert');
 const fs = require('fs');
+const crypto = require('crypto');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
@@ -34,6 +35,59 @@ function loadStorageWithConfig(storageConfig, extraConfig = {}) {
   return require(storageModulePath);
 }
 
+function loadConfigWithEnv(ownerPassword, ownerPasswordFile) {
+  const configModulePath = path.join(repoRoot, 'modules', 'config.js');
+  const configJsonPath = path.join(repoRoot, 'config-default.json');
+  if (ownerPassword === undefined) {
+    delete process.env.OWNER_PASSWORD;
+  } else {
+    process.env.OWNER_PASSWORD = ownerPassword;
+  }
+  if (ownerPasswordFile === undefined) {
+    delete process.env.OWNER_PASSWORD_FILE;
+  } else {
+    process.env.OWNER_PASSWORD_FILE = ownerPasswordFile;
+  }
+  clearModule(configModulePath);
+  clearModule(configJsonPath);
+  return require(configModulePath);
+}
+
+function testConfigEnvironment() {
+  const previousPassword = process.env.OWNER_PASSWORD;
+  const previousPasswordFile = process.env.OWNER_PASSWORD_FILE;
+  const secretPath = path.join(tmpDir, 'owner-password.secret');
+  const statePath = path.join(tmpDir, 'auth-env-state.json');
+  fs.writeFileSync(secretPath, 'file-password-123\n');
+  fs.rmSync(statePath, { force: true });
+
+  try {
+    assert.equal(loadConfigWithEnv('env-password-123').auth.ownerPassword, 'env-password-123');
+    assert.equal(loadConfigWithEnv('env-password-123', secretPath).auth.ownerPassword, 'file-password-123');
+    assert.equal(loadConfigWithEnv(undefined, secretPath).auth.ownerPassword, 'file-password-123');
+    assert.equal(loadConfigWithEnv().auth.ownerPassword, '');
+    assert.throws(() => loadConfigWithEnv('env-password-123', ''), /OWNER_PASSWORD_FILE must not be empty/);
+    assert.throws(() => loadConfigWithEnv(undefined, path.join(tmpDir, 'missing.secret')), /ENOENT/);
+
+    const config = loadConfigWithEnv(undefined, secretPath);
+    config.auth.statePath = './.tmp/tests/auth-env-state.json';
+    injectConfig(config);
+    clearModule(path.join(repoRoot, 'modules', 'auth.js'));
+    const auth = require(path.join(repoRoot, 'modules', 'auth.js'));
+    assert.equal(auth.verifyPassword('file-password-123'), true);
+    assert.match(JSON.parse(fs.readFileSync(statePath, 'utf8')).passwordHash, /^scrypt\$/);
+  } finally {
+    fs.rmSync(secretPath, { force: true });
+    fs.rmSync(statePath, { force: true });
+    if (previousPassword === undefined) delete process.env.OWNER_PASSWORD;
+    else process.env.OWNER_PASSWORD = previousPassword;
+    if (previousPasswordFile === undefined) delete process.env.OWNER_PASSWORD_FILE;
+    else process.env.OWNER_PASSWORD_FILE = previousPasswordFile;
+    clearModule(path.join(repoRoot, 'modules', 'config.js'));
+    clearModule(path.join(repoRoot, 'config-default.json'));
+  }
+}
+
 function testJsonStorageRoundtrip() {
   const filePath = path.join(tmpDir, 'roundtrip.json');
   fs.rmSync(filePath, { force: true });
@@ -50,7 +104,7 @@ function testJsonStorageRoundtrip() {
       to: 'demo@example.com',
       from: 'sender@example.com',
       subject: 'Hello',
-      date: '2026-05-01T10:00:00.000Z'
+      date: new Date().toISOString()
     },
     text: 'abcdefghijklmnopqrstuvwxyz',
     html: '<b>hello</b>'
@@ -120,41 +174,51 @@ function testUtils() {
   assert.equal(isValidInboxName('bad/name', []), false);
   assert(createAnonymousInboxId().startsWith('anon-'));
 
-  const sanitized = sanitizeHtml('<div onclick="alert(1)"><script>alert(1)</script><a href="javascript:alert(2)">x</a></div>');
-  assert(!sanitized.includes('<script'));
-  assert(!sanitized.includes('onclick='));
-  assert(!sanitized.includes('javascript:'));
+  const html = '<div onclick="alert(1)"><script>alert(1)</script><a href="javascript:alert(2)">x</a></div>';
+  assert.equal(sanitizeHtml(html), html);
 }
 
 function testAuthModule() {
   const authStatePath = path.join(tmpDir, 'auth-state.json');
   fs.rmSync(authStatePath, { force: true });
 
-  injectConfig({ auth: { ownerPassword: '', statePath: './.tmp/tests/auth-state.json', sessionTtlHours: 1 } });
+  injectConfig({ auth: { ownerPassword: 'initialpassword123', statePath: './.tmp/tests/auth-state.json', sessionTtlHours: 1, requireHttps: true } });
   clearModule(path.join(repoRoot, 'modules', 'auth.js'));
-  const auth = require(path.join(repoRoot, 'modules', 'auth.js'));
+  let auth = require(path.join(repoRoot, 'modules', 'auth.js'));
 
   const info = auth.getAuthInfo();
-  assert(info.generatedPassword);
-  assert.equal(auth.verifyPassword(info.generatedPassword), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(info, 'generatedPassword'), false);
+  assert.equal(auth.verifyPassword('initialpassword123'), true);
+  assert.match(JSON.parse(fs.readFileSync(authStatePath, 'utf8')).passwordHash, /^scrypt\$/);
 
   const session = auth.createSession();
   assert(session.token);
   assert(auth.getSession(session.token));
   const cookie = auth.buildSetCookie(session.token, session.expiresAt);
   assert(cookie.includes('fm_session='));
+  assert(cookie.includes('HttpOnly'));
+  assert(cookie.includes('Secure'));
+  assert(cookie.includes('SameSite=Strict'));
 
-  const req = { headers: { cookie: 'fm_session=' + encodeURIComponent(session.token) } };
+  const req = { headers: { cookie: 'fm_session=' + encodeURIComponent(session.token) }, secure: true };
   assert.equal(auth.isOwnerRequest(req), true);
+  assert.equal(auth.isSecureRequest(req), true);
+  assert.equal(auth.isSecureRequest({ secure: false }), false);
 
   auth.changePassword('newpassword123');
-  const infoAfter = auth.getAuthInfo();
-  assert.equal(infoAfter.generatedPassword, '');
   assert.equal(auth.verifyPassword('newpassword123'), true);
   assert.throws(() => auth.changePassword('123'), /password too short/);
 
   auth.clearSession(session.token);
   assert.equal(auth.isOwnerRequest(req), false);
+
+  fs.writeFileSync(authStatePath, JSON.stringify({ passwordHash: crypto.createHash('sha256').update('legacy-password').digest('hex') }));
+  clearModule(path.join(repoRoot, 'modules', 'auth.js'));
+  auth = require(path.join(repoRoot, 'modules', 'auth.js'));
+  assert.equal(auth.verifyPassword('wrong-password'), false);
+  assert.match(JSON.parse(fs.readFileSync(authStatePath, 'utf8')).passwordHash, /^[a-f0-9]{64}$/);
+  assert.equal(auth.verifyPassword('legacy-password'), true);
+  assert.match(JSON.parse(fs.readFileSync(authStatePath, 'utf8')).passwordHash, /^scrypt\$/);
 }
 
 function testInboxesModule() {
@@ -293,6 +357,7 @@ try {
   testTransientMailDoesNotPersist();
   testSqliteGuard();
   testUtils();
+  testConfigEnvironment();
   testAuthModule();
   testInboxesModule();
   testSqliteMigrationScript();

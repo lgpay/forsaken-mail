@@ -10,7 +10,13 @@ let debug = require('debug')('app');
 let bodyParser = require('body-parser');
 
 let api = require(path.join(__dirname, 'routes/api'));
+let config = require(path.join(__dirname, 'modules/config'));
 let app = express();
+
+const authConfig = config.auth || {};
+if (authConfig.trustProxy !== false && authConfig.trustProxy !== undefined) {
+  app.set('trust proxy', authConfig.trustProxy);
+}
 
 app.set('x-powered-by', false);
 app.use(bodyParser.json());

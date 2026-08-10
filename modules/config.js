@@ -13,9 +13,21 @@ const defaultConfigPath = path.join(__dirname, '..', 'config-default.js')
 let config = {};
 
 if (fs.existsSync(defaultConfigJsonPath)) {
-    config = require(defaultConfigJsonPath);
+    config = JSON.parse(JSON.stringify(require(defaultConfigJsonPath)));
 } else {
-    config = require(defaultConfigPath);
+    config = JSON.parse(JSON.stringify(require(defaultConfigPath)));
 }
+
+const auth = config.auth || {};
+if (process.env.OWNER_PASSWORD_FILE !== undefined) {
+    const passwordFile = String(process.env.OWNER_PASSWORD_FILE).trim();
+    if (!passwordFile) {
+        throw new Error('OWNER_PASSWORD_FILE must not be empty.');
+    }
+    auth.ownerPassword = fs.readFileSync(passwordFile, 'utf8').trim();
+} else if (process.env.OWNER_PASSWORD !== undefined) {
+    auth.ownerPassword = String(process.env.OWNER_PASSWORD).trim();
+}
+config.auth = auth;
 
 module.exports = config;

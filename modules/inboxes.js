@@ -83,18 +83,18 @@ function ensurePersistentInbox(inbox) {
   return entry;
 }
 
-function bindSession(sessionId, inbox, mode, runtimeHost) {
+function bindSession(sessionId, inbox, mode, runtimeHost, ownerId) {
   cleanup();
   unbindSession(sessionId);
   const entry = mode === 'persistent' ? ensurePersistentInbox(inbox) : ensureAnonymousInbox(inbox);
   entry.sessions.add(sessionId);
-  sessions.set(sessionId, { inbox, mode, host: resolveHost(runtimeHost) });
+  sessions.set(sessionId, { inbox, mode, host: resolveHost(runtimeHost), ownerId: ownerId || null });
   return entry;
 }
 
-function unbindSession(sessionId) {
+function unbindSession(sessionId, ownerId) {
   const current = sessions.get(sessionId);
-  if (!current) return;
+  if (!current || (ownerId && current.ownerId !== ownerId)) return;
   const entry = inboxes.get(current.inbox);
   if (entry && entry.sessions) {
     entry.sessions.delete(sessionId);

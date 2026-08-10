@@ -16,7 +16,9 @@
   "auth": {
     "ownerPassword": "",
     "statePath": "./data/auth-state.json",
-    "sessionTtlHours": 168
+    "sessionTtlHours": 168,
+    "requireHttps": true,
+    "trustProxy": false
   },
   "host": "mail.example.com",
   "keywordBlackList": ["admin", "postmaster", "system", "webmaster", "administrator", "hostmaster", "service", "server", "root"]

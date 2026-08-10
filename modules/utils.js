@@ -5,12 +5,9 @@ const crypto = require('crypto');
 const RESERVED_PATTERN = /^[a-z0-9][a-z0-9._-]{1,31}$/;
 
 function sanitizeHtml(html) {
-  if (!html) return '';
-  return String(html)
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-    .replace(/\son\w+=("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '');
+  // HTML mail is rendered inside a sandboxed iframe on the client. Do not rely
+  // on regex rewriting as a security boundary; preserve it for that isolated view.
+  return html ? String(html) : '';
 }
 
 function isValidInboxName(id, keywordBlackList) {
