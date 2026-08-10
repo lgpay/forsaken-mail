@@ -29,6 +29,7 @@ Forsaken-Mail
 - owner 持久 inbox
 - owner 登录 / 退出 / 修改密码
 - scrypt 密码哈希与旧版 SHA-256 登录后迁移
+- Socket.IO 与 API 共用浏览器 Inbox 会话标识，邮件到达后可正常刷新列表
 - 邮件历史持久化
 - Inbox 历史列表 API
 - 邮件详情 API
@@ -137,7 +138,9 @@ npm test
 
 旧版 `auth-state.json` 中的 SHA-256 哈希会在首次成功登录后自动升级为 scrypt；失败登录不会改写旧记录。
 
-默认 `auth.requireHttps` 为 `true`：owner 登录、退出、改密及 owner 已登录的邮件访问都要求 HTTPS，且会话 Cookie 带有 `Secure`、`HttpOnly`、`SameSite=Strict`。在反向代理终止 TLS 时，明确将 `auth.trustProxy` 配置为受信任代理跳数（例如 `1`）；不要在公网部署中关闭 HTTPS 要求。仅本地开发可设置 `auth.requireHttps: false`，这会降低认证安全性。
+默认 `auth.requireHttps` 为 `true`：owner 登录、退出、改密及 owner 已登录的邮件访问都要求 HTTPS，且会话 Cookie 带有 `Secure`、`HttpOnly`、`SameSite=Strict`。在反向代理终止 TLS 时，明确将 `auth.trustProxy` 配置为受信任代理跳数（例如 `1`）；不要在公网部署中关闭 HTTPS 要求。
+
+仅本地测试可将 `config-default.json` 中的 `auth.requireHttps` 设置为 `false`，此时 owner 操作允许通过 HTTP，且会话 Cookie 会自动不带 `Secure` 属性，以便 HTTP 客户端保持登录状态。HTTP 会明文传输密码和会话，仅适用于本机或隔离测试环境；生产环境必须保持 `true` 并使用 HTTPS。
 
 ---
 
@@ -314,6 +317,8 @@ owner 修改密码。
 ### `GET /api/session/inbox`
 
 获取当前匿名 / 持久 inbox 会话绑定信息。
+
+浏览器会将 Inbox 会话 ID 保存在 `localStorage` 的 `fm_inbox_session` 中，并同时通过 `X-Inbox-Session` 请求头和 Socket.IO 握手传递。不要在不同浏览器、隐私窗口或清除站点存储后继续使用旧的匿名地址；这会创建新的会话绑定。
 
 ### `GET /api/inboxes/:inbox/mails`
 
